@@ -12,7 +12,7 @@ from model import (
 )
 
 
-QUESTION_COUNT = 10
+QUESTION_COUNT = 20
 TARGET_COUNT = 5
 MIN_CONFIRMED_TARGETS = 3
 QUALIFYING_IMPROVEMENT_PERCENT = 10.0
@@ -144,7 +144,7 @@ class SurveyApp:
             ).pack(side="right", padx=3)
         tk.Label(
             header,
-            text="Ten answers. A few groovy guesses.",
+            text=f"{QUESTION_COUNT} answers. A few groovy guesses.",
             bg=BROWN,
             fg="#fff4d6",
             font=("SignPainter", 27),
@@ -238,7 +238,7 @@ class SurveyApp:
         art.create_text(
             440,
             199,
-            text="finding ten questions with something interesting to say",
+            text=f"finding {QUESTION_COUNT} questions with something interesting to say",
             fill="#fff1d3",
             font=("SignPainter", 18),
         )
@@ -371,7 +371,7 @@ class SurveyApp:
         intro.pack(fill="x")
         tk.Label(
             intro,
-            text="Your ten-question mix is ready",
+            text=f"Your {QUESTION_COUNT}-question mix is ready",
             bg=BACKGROUND,
             fg=INK,
             font=("Phosphate", 24),
@@ -388,6 +388,14 @@ class SurveyApp:
             wraplength=780,
             justify="left",
         ).pack(anchor="w", pady=(8, 0))
+        self.answer_progress_label = tk.Label(
+            intro,
+            text=f"0 / {QUESTION_COUNT} dials tuned",
+            bg=BACKGROUND,
+            fg=ACCENT,
+            font=("Phosphate", 13),
+        )
+        self.answer_progress_label.pack(anchor="w", pady=(12, 0))
 
         cards_grid = tk.Frame(body, bg=BACKGROUND, padx=40)
         cards_grid.pack(fill="x")
@@ -481,6 +489,10 @@ class SurveyApp:
                 relief="sunken" if selected else "flat",
                 bd=2 if selected else 0,
             )
+        answered = sum(variable.get() != 0 for variable in self.answer_variables.values())
+        self.answer_progress_label.configure(
+            text=f"{answered} / {QUESTION_COUNT} dials tuned"
+        )
 
     def _begin_prediction(self, canvas: tk.Canvas) -> None:
         unanswered = [

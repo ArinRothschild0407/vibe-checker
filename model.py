@@ -5,6 +5,7 @@ evaluation uses those same five answers, never the rest of a survey row.
 """
 
 from dataclasses import dataclass
+from math import ceil
 from pathlib import Path
 from random import SystemRandom
 from typing import Mapping, Sequence
@@ -343,9 +344,9 @@ def choose_guided_questions(
     discovery_rows: pd.DataFrame,
     *,
     question_count: int = 10,
-    pool_size: int = 40,
-    max_per_category: int = 2,
-    redundancy_limit: float = 0.55,
+    pool_size: int | None = None,
+    max_per_category: int | None = None,
+    redundancy_limit: float | None = None,
 ) -> list[str]:
     """Randomly sample diverse questions with cross-category information.
 
@@ -358,6 +359,12 @@ def choose_guided_questions(
         for column in discovery_rows.select_dtypes(include="number").columns
         if discovery_rows[column].dropna().between(1, 5).all()
     ]
+    categories = {question_category(discovery_rows, column) for column in candidates}
+    pool_size = pool_size or max(40, question_count * 3)
+    max_per_category = max_per_category or ceil(question_count / len(categories))
+    # Larger groups need a little more overlap or the candidate pool can become
+    # impossible to fill. They still reject very highly redundant questions.
+    redundancy_limit = redundancy_limit or (0.55 if question_count <= 10 else 0.65)
     correlations = discovery_rows[candidates].corr(method="spearman").fillna(0.0)
     scores: dict[str, float] = {}
     for question in candidates:
