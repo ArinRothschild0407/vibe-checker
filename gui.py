@@ -74,6 +74,7 @@ class SurveyApp:
         self.survey_columns = list(self.survey.columns)
         self.search = None
         self.answer_variables: dict[str, tk.IntVar] = {}
+        self.answer_buttons: dict[str, list[tk.Button]] = {}
         self.active_canvas: tk.Canvas | None = None
 
         self._configure_styles()
@@ -265,6 +266,7 @@ class SurveyApp:
         self._clear_content()
         self.search = None
         self.answer_variables = {}
+        self.answer_buttons = {}
 
         panel = tk.Frame(self.content, bg=BACKGROUND, padx=22, pady=22)
         panel.pack(fill="both", expand=True)
@@ -433,28 +435,30 @@ class SurveyApp:
 
             variable = tk.IntVar(value=0)
             self.answer_variables[question] = variable
+            self.answer_buttons[question] = []
             choices = tk.Frame(card, bg=CARD)
             choices.pack(anchor="w")
             for value in range(1, 6):
-                tk.Radiobutton(
+                button = tk.Button(
                     choices,
                     text=str(value),
-                    value=value,
-                    variable=variable,
-                    indicatoron=False,
                     width=3,
                     bg="#f3dfb7",
                     fg=INK,
                     activebackground=MUSTARD,
                     activeforeground=INK,
-                    selectcolor=category_color,
                     font=("Futura", 11, "bold"),
                     relief="flat",
                     bd=0,
                     padx=3,
                     pady=5,
                     cursor="hand2",
-                ).pack(side="left", padx=(0, 7))
+                    command=lambda q=question, v=value, c=category_color: (
+                        self._select_answer(q, v, c)
+                    ),
+                )
+                button.pack(side="left", padx=(0, 7))
+                self.answer_buttons[question].append(button)
 
         action = tk.Frame(body, bg=BACKGROUND, padx=48, pady=26)
         action.pack(fill="x")
@@ -464,6 +468,19 @@ class SurveyApp:
             style="Accent.TButton",
             command=lambda: self._begin_prediction(canvas),
         ).pack(side="right")
+
+    def _select_answer(self, question: str, value: int, color: str) -> None:
+        """Record an answer and make the chosen number visually unmistakable."""
+
+        self.answer_variables[question].set(value)
+        for number, button in enumerate(self.answer_buttons[question], start=1):
+            selected = number == value
+            button.configure(
+                bg=color if selected else "#f3dfb7",
+                fg="white" if selected else INK,
+                relief="sunken" if selected else "flat",
+                bd=2 if selected else 0,
+            )
 
     def _begin_prediction(self, canvas: tk.Canvas) -> None:
         unanswered = [
