@@ -5,6 +5,8 @@ evaluation uses those same five answers, never the rest of a survey row.
 """
 
 from dataclasses import dataclass
+from pathlib import Path
+from random import SystemRandom
 from typing import Mapping, Sequence
 
 import numpy as np
@@ -28,8 +30,34 @@ class TargetResult:
     test_samples: int
 
 
+@dataclass(frozen=True)
+class PredictionExperiment:
+    """A five-question/target relationship tested on untouched participants."""
+
+    target: str
+    input_questions: tuple[str, ...]
+    validation_improvement_percent: float
+    test_model_mae: float
+    test_baseline_mae: float
+    test_improvement_percent: float
+    test_samples: int
+
+
 def load_survey(path: str = "data/responses.csv") -> pd.DataFrame:
-    return pd.read_csv(path)
+    """Load responses and replace every shortened name with original wording."""
+
+    response_path = Path(path)
+    survey = pd.read_csv(response_path)
+    column_guide = pd.read_csv(response_path.with_name("columns.csv"))
+    short_to_original = dict(zip(column_guide["short"], column_guide["original"]))
+
+    missing_metadata = set(survey.columns) - set(short_to_original)
+    if missing_metadata:
+        raise ValueError(
+            "columns.csv has no original wording for: "
+            f"{sorted(missing_metadata)}"
+        )
+    return survey.rename(columns=short_to_original)
 
 
 def _validate_inputs(df: pd.DataFrame, input_columns: Sequence[str]) -> list[str]:
@@ -69,6 +97,188 @@ def make_regression_pipeline(random_state: int = 42) -> Pipeline:
             )),
         ]
     )
+
+
+def _mae_comparison(
+    model: Pipeline,
+    train_rows: pd.DataFrame,
+    evaluation_rows: pd.DataFrame,
+    inputs: Sequence[str],
+    target: str,
+) -> tuple[float, float, float]:
+    """Fit one experiment and compare it with a training-median baseline."""
+
+    train_rows = train_rows[train_rows[target].notna()]
+    evaluation_rows = evaluation_rows[evaluation_rows[target].notna()]
+    model.fit(train_rows[list(inputs)], train_rows[target])
+    model_mae = mean_absolute_error(
+        evaluation_rows[target], model.predict(evaluation_rows[list(inputs)])
+    )
+    baseline_value = train_rows[target].median()
+    baseline_mae = mean_absolute_error(
+        evaluation_rows[target], np.full(len(evaluation_rows), baseline_value)
+    )
+    improvement_percent = (
+        100.0 * (baseline_mae - model_mae) / baseline_mae
+        if baseline_mae > 0 else 0.0
+    )
+    return model_mae, baseline_mae, improvement_percent
+
+
+def discover_best_prediction_experiment(
+    df: pd.DataFrame,
+    *,
+    question_count: int = 5,
+    random_state: int = 42,
+) -> PredictionExperiment:
+    """Discover which five questions best predict an unanswered response.
+
+    Training selects target-specific inputs, validation ranks all targets, and
+    the single best discovery is then confirmed on untouched test participants.
+    """
+
+    all_indices = np.arange(len(df))
+    train_validation_indices, test_indices = train_test_split(
+        all_indices, test_size=0.2, random_state=random_state
+    )
+    train_indices, validation_indices = train_test_split(
+        train_validation_indices, test_size=0.25, random_state=random_state
+    )
+    train_rows = df.iloc[train_indices]
+    validation_rows = df.iloc[validation_indices]
+    test_rows = df.iloc[test_indices]
+
+    numeric_targets = list(df.select_dtypes(include="number").columns)
+    # Inputs must be questions a player can answer on a 1-5 scale.
+    candidate_inputs = [
+        column
+        for column in train_rows.select_dtypes(include="number").columns
+        if train_rows[column].dropna().between(1, 5).all()
+    ]
+    discoveries: list[tuple[float, str, tuple[str, ...]]] = []
+
+    for target in numeric_targets:
+        possible_inputs = [question for question in candidate_inputs if question != target]
+        # Correlation screening sees training participants only.
+        correlations = train_rows[possible_inputs].corrwith(
+            train_rows[target], method="spearman"
+        ).abs().fillna(0.0)
+        inputs = tuple(correlations.nlargest(question_count).index)
+        if len(inputs) < question_count:
+            continue
+        _, _, validation_gain = _mae_comparison(
+            make_regression_pipeline(random_state),
+            train_rows,
+            validation_rows,
+            inputs,
+            target,
+        )
+        discoveries.append((validation_gain, target, inputs))
+
+    if not discoveries:
+        raise ValueError("No numeric prediction experiments could be evaluated.")
+
+    validation_gain, target, inputs = max(discoveries, key=lambda item: item[0])
+    # The final test group influenced neither question nor target selection.
+    development_rows = df.iloc[train_validation_indices]
+    test_model_mae, test_baseline_mae, test_gain = _mae_comparison(
+        make_regression_pipeline(random_state),
+        development_rows,
+        test_rows,
+        inputs,
+        target,
+    )
+    return PredictionExperiment(
+        target=target,
+        input_questions=inputs,
+        validation_improvement_percent=validation_gain,
+        test_model_mae=test_model_mae,
+        test_baseline_mae=test_baseline_mae,
+        test_improvement_percent=test_gain,
+        test_samples=int(test_rows[target].notna().sum()),
+    )
+
+
+def choose_random_questions(
+    df: pd.DataFrame,
+    *,
+    question_count: int = 5,
+) -> list[str]:
+    """Choose random questions whose recorded answers use a 1-5 scale."""
+
+    candidates = [
+        column
+        for column in df.select_dtypes(include="number").columns
+        if df[column].dropna().between(1, 5).all()
+    ]
+    if question_count > len(candidates):
+        raise ValueError("Not enough 1-5 questions in the dataset.")
+    # SystemRandom intentionally gives the game a fresh group on each run.
+    return SystemRandom().sample(candidates, question_count)
+
+
+def evaluate_question_group(
+    df: pd.DataFrame,
+    input_questions: Sequence[str],
+    *,
+    target_count: int = 5,
+    random_state: int = 42,
+) -> list[PredictionExperiment]:
+    """Find and finally confirm what one exact question group can predict.
+
+    Models are ranked on validation people. Only the top targets are then scored
+    on untouched test people, so the game never evaluates using hidden answers.
+    """
+
+    inputs = tuple(_validate_inputs(df, input_questions))
+    all_indices = np.arange(len(df))
+    train_validation_indices, test_indices = train_test_split(
+        all_indices, test_size=0.2, random_state=random_state
+    )
+    train_indices, validation_indices = train_test_split(
+        train_validation_indices, test_size=0.25, random_state=random_state
+    )
+    train_rows = df.iloc[train_indices]
+    validation_rows = df.iloc[validation_indices]
+    test_rows = df.iloc[test_indices]
+
+    validation_results: list[tuple[float, str]] = []
+    targets = [
+        column for column in df.select_dtypes(include="number").columns
+        if column not in inputs
+    ]
+    for target in targets:
+        _, _, validation_gain = _mae_comparison(
+            make_regression_pipeline(random_state),
+            train_rows,
+            validation_rows,
+            inputs,
+            target,
+        )
+        validation_results.append((validation_gain, target))
+
+    # Validation chooses at most five targets before final test is examined.
+    finalists = sorted(validation_results, reverse=True)[:target_count]
+    development_rows = df.iloc[train_validation_indices]
+    experiments: list[PredictionExperiment] = []
+    for validation_gain, target in finalists:
+        test_model_mae, test_baseline_mae, test_gain = _mae_comparison(
+            make_regression_pipeline(random_state),
+            development_rows,
+            test_rows,
+            inputs,
+            target,
+        )
+        experiments.append(PredictionExperiment(
+            target=target,
+            input_questions=inputs,
+            validation_improvement_percent=validation_gain,
+            test_model_mae=test_model_mae,
+            test_baseline_mae=test_baseline_mae,
+            test_improvement_percent=test_gain,
+            test_samples=int(test_rows[target].notna().sum()),
+        ))
+    return experiments
 
 
 def discover_input_questions(
@@ -224,22 +434,28 @@ def predict_targets(
 
 
 def print_ranking(results: Sequence[TargetResult], limit: int = 10) -> None:
-    """Print a compact experiment table."""
+    """Print results without shortening the original survey questions."""
 
-    print(f"{'Target':30} {'Model MAE':>10} {'Baseline':>10} {'Gain':>9} {'Gain %':>8}")
-    print("-" * 72)
-    for result in results[:limit]:
+    for rank, result in enumerate(results[:limit], start=1):
+        print(f"{rank}. {result.target}")
         print(
-            f"{result.target[:30]:30} {result.model_mae:10.3f} "
-            f"{result.baseline_mae:10.3f} {result.improvement:9.3f} "
-            f"{result.improvement_percent:7.1f}%"
+            f"   Model MAE: {result.model_mae:.3f} | "
+            f"Baseline MAE: {result.baseline_mae:.3f} | "
+            f"Improvement: {result.improvement_percent:.1f}%"
         )
 
 
 if __name__ == "__main__":
     survey = load_survey()
-    discovered_inputs = discover_input_questions(survey)
-    ranking = evaluate_numeric_targets(survey, discovered_inputs)
-    print("\nFive questions selected from training data:")
-    print(", ".join(discovered_inputs))
-    print_ranking(ranking)
+    random_questions = choose_random_questions(survey, question_count=5)
+    experiments = evaluate_question_group(survey, random_questions, target_count=5)
+    print("\nRandomly selected questions:")
+    for question in random_questions:
+        print(f"- {question}")
+    print("\nTop targets selected on validation and checked on final test:")
+    for experiment in experiments:
+        print(f"- {experiment.target}")
+        print(
+            f"  Validation gain: {experiment.validation_improvement_percent:.1f}% | "
+            f"Final gain: {experiment.test_improvement_percent:.1f}%"
+        )

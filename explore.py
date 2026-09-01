@@ -1,6 +1,6 @@
-import pandas as pd
+from model import load_survey
 
-df = pd.read_csv("data/responses.csv")
+df = load_survey()
 
 print("Dataset shape:", df.shape)
 
