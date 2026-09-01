@@ -19,14 +19,29 @@ QUALIFYING_IMPROVEMENT_PERCENT = 10.0
 FINAL_IMPROVEMENT_PERCENT = 5.0
 MAX_GROUP_ATTEMPTS = 10
 
-BACKGROUND = "#f4f1ea"
-CARD = "#ffffff"
-INK = "#172126"
-MUTED = "#617078"
-ACCENT = "#27756a"
-ACCENT_DARK = "#17564f"
-SOFT_ACCENT = "#dcece8"
-WARNING = "#a65b24"
+BACKGROUND = "#f7e5bd"
+CARD = "#fff8e7"
+INK = "#43281f"
+MUTED = "#785b4b"
+ACCENT = "#e85d3f"
+ACCENT_DARK = "#a93c2b"
+SOFT_ACCENT = "#f2bd3b"
+WARNING = "#b34f32"
+MUSTARD = "#e9a72f"
+AVOCADO = "#71853a"
+TEAL = "#2c7a73"
+PINK = "#cf6681"
+BROWN = "#5b3428"
+
+CATEGORY_COLORS = {
+    "Music": PINK,
+    "Movies": ACCENT,
+    "Interests": TEAL,
+    "Fears": MUSTARD,
+    "Personality and lifestyle": AVOCADO,
+    "Spending": "#9b5f9e",
+    "Demographics": BROWN,
+}
 
 
 def question_scale(question: str, survey_columns: list[str]) -> str:
@@ -50,7 +65,7 @@ def question_scale(question: str, survey_columns: list[str]) -> str:
 class SurveyApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("Survey Signals")
+        self.root.title("Vibe Check '75")
         self.root.geometry("980x780")
         self.root.minsize(760, 620)
         self.root.configure(bg=BACKGROUND)
@@ -86,39 +101,147 @@ class SurveyApp:
             foreground="white",
             borderwidth=0,
             padding=(20, 12),
-            font=("Helvetica", 12, "bold"),
+            font=("Avenir Next", 12, "bold"),
         )
         style.map("Accent.TButton", background=[("active", ACCENT_DARK)])
         style.configure(
             "Secondary.TButton",
-            background=SOFT_ACCENT,
-            foreground=ACCENT_DARK,
+            background=MUSTARD,
+            foreground=BROWN,
             borderwidth=0,
             padding=(18, 10),
-            font=("Helvetica", 11, "bold"),
+            font=("Avenir Next", 11, "bold"),
         )
-        style.configure("Survey.TRadiobutton", background=CARD, font=("Helvetica", 11))
+        style.configure(
+            "Survey.TRadiobutton",
+            background=CARD,
+            foreground=INK,
+            font=("Avenir Next", 12, "bold"),
+        )
 
     def _build_shell(self) -> None:
-        header = tk.Frame(self.root, bg=INK, padx=34, pady=22)
+        header = tk.Frame(self.root, bg=BROWN, padx=34, pady=14)
         header.pack(fill="x")
+        badge_row = tk.Frame(header, bg=BROWN)
+        badge_row.pack(fill="x")
+        tk.Label(
+            badge_row,
+            text="  VIBE CHECK '75  ",
+            bg=MUSTARD,
+            fg=BROWN,
+            font=("Phosphate", 14),
+            padx=8,
+            pady=4,
+        ).pack(side="left")
+        for color in (ACCENT, PINK, TEAL, AVOCADO):
+            tk.Label(
+                badge_row,
+                text="●",
+                bg=BROWN,
+                fg=color,
+                font=("Helvetica", 16, "bold"),
+            ).pack(side="right", padx=3)
         tk.Label(
             header,
-            text="SURVEY SIGNALS",
-            bg=INK,
-            fg="#9bd4ca",
-            font=("Helvetica", 11, "bold"),
-        ).pack(anchor="w")
-        tk.Label(
-            header,
-            text="What can ten answers really predict?",
-            bg=INK,
-            fg="white",
-            font=("Helvetica", 24, "bold"),
-        ).pack(anchor="w", pady=(4, 0))
+            text="Ten answers. A few groovy guesses.",
+            bg=BROWN,
+            fg="#fff4d6",
+            font=("SignPainter", 27),
+        ).pack(anchor="w", pady=(10, 0))
+
+        stripe = tk.Canvas(
+            self.root,
+            height=12,
+            bg=BROWN,
+            highlightthickness=0,
+        )
+        stripe.pack(fill="x")
+        stripe_colors = (ACCENT, MUSTARD, AVOCADO, TEAL, PINK, "#8a6b9b")
+        for index, color in enumerate(stripe_colors):
+            stripe.create_rectangle(
+                index * 170,
+                0,
+                (index + 1) * 170,
+                12,
+                fill=color,
+                outline=color,
+            )
 
         self.content = tk.Frame(self.root, bg=BACKGROUND)
         self.content.pack(fill="both", expand=True)
+
+    def _retro_pattern(self, parent: tk.Widget) -> tk.Canvas:
+        """Draw a wide 1970s poster pattern inspired by the supplied reference."""
+
+        art = tk.Canvas(
+            parent,
+            width=880,
+            height=330,
+            bg="#f9e7cd",
+            highlightthickness=2,
+            highlightbackground=BROWN,
+        )
+        palette = (ACCENT, MUSTARD, AVOCADO, TEAL, PINK, "#8a6b9b")
+
+        # Left: parallel flowing ribbons that enter and leave the frame.
+        wave = (-80, 82, 60, 18, 155, 96, 280, 36, 385, 104)
+        for offset, color in reversed(list(enumerate(palette[:4]))):
+            shifted = tuple(
+                value + (offset * 18 if index % 2 else 0)
+                for index, value in enumerate(wave)
+            )
+            art.create_line(
+                shifted,
+                smooth=True,
+                splinesteps=32,
+                width=27,
+                fill=BROWN,
+            )
+            art.create_line(
+                shifted,
+                smooth=True,
+                splinesteps=32,
+                width=23,
+                fill=color,
+            )
+
+        # Right: a low sunburst gives the composition a poster-panel rhythm.
+        centre_x, centre_y = 742, 330
+        ray_points = (430, 330, 505, 35, 585, 330, 635, 0, 690, 330, 755, 0,
+                      785, 330, 875, 25, 880, 330)
+        rays = [ray_points[index:index + 6] for index in range(0, 24, 6)]
+        for index, points in enumerate(rays):
+            art.create_polygon(
+                centre_x,
+                centre_y,
+                *points,
+                fill=palette[(index + 1) % len(palette)],
+                outline=BROWN,
+                width=2,
+            )
+
+        # Bottom-left: oversized crop of a lava-loop shape.
+        art.create_oval(-125, 178, 330, 520, fill=AVOCADO, outline=BROWN, width=3)
+        art.create_oval(-66, 214, 278, 472, fill=MUSTARD, outline=BROWN, width=3)
+        art.create_oval(-12, 248, 222, 430, fill="#f9e7cd", outline=BROWN, width=3)
+
+        # A horizontal title strip ties the different patterns together.
+        art.create_rectangle(0, 130, 880, 224, fill="#ca5e2b", outline=BROWN, width=3)
+        art.create_text(
+            440,
+            164,
+            text="TUNING THE VIBE MACHINE",
+            fill="#fff1d3",
+            font=("Phosphate", 25),
+        )
+        art.create_text(
+            440,
+            199,
+            text="finding ten questions with something interesting to say",
+            fill="#fff1d3",
+            font=("SignPainter", 18),
+        )
+        return art
 
     def _clear_content(self) -> None:
         self.active_canvas = None
@@ -143,24 +266,17 @@ class SurveyApp:
         self.search = None
         self.answer_variables = {}
 
-        panel = tk.Frame(self.content, bg=BACKGROUND, padx=60, pady=80)
+        panel = tk.Frame(self.content, bg=BACKGROUND, padx=22, pady=22)
         panel.pack(fill="both", expand=True)
-        tk.Label(
-            panel,
-            text="Finding an informative question group…",
-            bg=BACKGROUND,
-            fg=INK,
-            font=("Helvetica", 22, "bold"),
-        ).pack()
+        self._retro_pattern(panel).pack(fill="x", pady=(0, 16))
         tk.Label(
             panel,
             text=(
-                "Testing data-guided groups across music, movies, interests, "
-                "fears, personality, and spending."
+                "Mixing music, movies, interests, fears, personality, and spending…"
             ),
             bg=BACKGROUND,
             fg=MUTED,
-            font=("Helvetica", 12),
+            font=("Avenir Next", 12),
             wraplength=620,
             justify="center",
         ).pack(pady=(14, 26))
@@ -169,10 +285,10 @@ class SurveyApp:
         progress.start(12)
         self.status_label = tk.Label(
             panel,
-            text="Comparing five ML algorithms on held-out participants…",
+            text="Looking for a question mix with genuinely good vibes…",
             bg=BACKGROUND,
             fg=ACCENT,
-            font=("Helvetica", 11),
+            font=("Avenir Next", 11, "bold"),
         )
         self.status_label.pack(pady=16)
 
@@ -199,26 +315,26 @@ class SurveyApp:
             panel.pack(fill="both", expand=True)
             tk.Label(
                 panel,
-                text="No qualifying group found",
+                text="The stars didn't align this time",
                 bg=BACKGROUND,
                 fg=INK,
-                font=("Helvetica", 22, "bold"),
+                font=("Avenir Next", 22, "bold"),
             ).pack()
             tk.Label(
                 panel,
                 text=(
-                    "No group predicted at least three targets strongly enough. "
-                    "That is a valid negative result—try another search."
+                    "That question mix didn't have enough signal for three fair "
+                    "guesses. Let's shuffle the deck and try again."
                 ),
                 bg=BACKGROUND,
                 fg=MUTED,
-                font=("Helvetica", 12),
+                font=("Avenir Next", 12),
                 wraplength=580,
                 justify="center",
             ).pack(pady=18)
             ttk.Button(
                 panel,
-                text="Search again",
+                text="Shuffle again",
                 style="Accent.TButton",
                 command=self.start_experiment,
             ).pack(pady=12)
@@ -253,43 +369,58 @@ class SurveyApp:
         intro.pack(fill="x")
         tk.Label(
             intro,
-            text="A useful, cross-category group was found",
+            text="Your ten-question mix is ready",
             bg=BACKGROUND,
             fg=INK,
-            font=("Helvetica", 20, "bold"),
+            font=("Phosphate", 24),
         ).pack(anchor="w")
         tk.Label(
             intro,
             text=(
-                f"Qualified after {self.search.attempts} search attempt(s). "
-                "Answer every question to reveal only predictions that survived final testing."
+                f"The deck clicked after {self.search.attempts} shuffle(s). "
+                "Pick a number for every question, then let the vibe reader do its thing."
             ),
             bg=BACKGROUND,
             fg=MUTED,
-            font=("Helvetica", 11),
+            font=("Avenir Next", 11),
             wraplength=780,
             justify="left",
         ).pack(anchor="w", pady=(8, 0))
 
+        cards_grid = tk.Frame(body, bg=BACKGROUND, padx=40)
+        cards_grid.pack(fill="x")
+        cards_grid.grid_columnconfigure(0, weight=1, uniform="questions")
+        cards_grid.grid_columnconfigure(1, weight=1, uniform="questions")
+
         for number, question in enumerate(self.search.input_questions, start=1):
-            card = tk.Frame(body, bg=CARD, padx=24, pady=18, highlightthickness=1)
-            card.configure(highlightbackground="#d9dedc")
-            card.pack(fill="x", padx=48, pady=7)
             category = question_category(self.survey, question)
+            category_color = CATEGORY_COLORS.get(category, ACCENT)
+            card = tk.Frame(
+                cards_grid,
+                bg=CARD,
+                padx=20,
+                pady=17,
+                highlightthickness=3,
+                highlightbackground=category_color,
+            )
+            row, column = divmod(number - 1, 2)
+            card.grid(row=row, column=column, sticky="nsew", padx=8, pady=8)
             tk.Label(
                 card,
-                text=f"{number:02d}  ·  {category.upper()}",
-                bg=CARD,
-                fg=ACCENT,
-                font=("Helvetica", 9, "bold"),
+                text=f"  {number:02d}  ·  {category.upper()}  ",
+                bg=category_color,
+                fg="white",
+                font=("Avenir Next", 9, "bold"),
+                padx=4,
+                pady=3,
             ).pack(anchor="w")
             tk.Label(
                 card,
                 text=question,
                 bg=CARD,
                 fg=INK,
-                font=("Helvetica", 13, "bold"),
-                wraplength=800,
+                font=("Avenir Next", 13, "bold"),
+                wraplength=360,
                 justify="left",
             ).pack(anchor="w", pady=(5, 4))
             tk.Label(
@@ -297,7 +428,7 @@ class SurveyApp:
                 text=question_scale(question, self.survey_columns),
                 bg=CARD,
                 fg=MUTED,
-                font=("Helvetica", 10),
+                font=("Avenir Next", 10),
             ).pack(anchor="w", pady=(0, 10))
 
             variable = tk.IntVar(value=0)
@@ -305,19 +436,31 @@ class SurveyApp:
             choices = tk.Frame(card, bg=CARD)
             choices.pack(anchor="w")
             for value in range(1, 6):
-                ttk.Radiobutton(
+                tk.Radiobutton(
                     choices,
                     text=str(value),
                     value=value,
                     variable=variable,
-                    style="Survey.TRadiobutton",
-                ).pack(side="left", padx=(0, 22))
+                    indicatoron=False,
+                    width=3,
+                    bg="#f3dfb7",
+                    fg=INK,
+                    activebackground=MUSTARD,
+                    activeforeground=INK,
+                    selectcolor=category_color,
+                    font=("Futura", 11, "bold"),
+                    relief="flat",
+                    bd=0,
+                    padx=3,
+                    pady=5,
+                    cursor="hand2",
+                ).pack(side="left", padx=(0, 7))
 
         action = tk.Frame(body, bg=BACKGROUND, padx=48, pady=26)
         action.pack(fill="x")
         ttk.Button(
             action,
-            text="Analyze my answers",
+            text="Read my vibe",
             style="Accent.TButton",
             command=lambda: self._begin_prediction(canvas),
         ).pack(side="right")
@@ -343,10 +486,10 @@ class SurveyApp:
         panel.pack(fill="both", expand=True)
         tk.Label(
             panel,
-            text="Building your predictions…",
+            text="Reading the room…",
             bg=BACKGROUND,
             fg=INK,
-            font=("Helvetica", 22, "bold"),
+            font=("Avenir Next", 23, "bold"),
         ).pack()
         progress = ttk.Progressbar(panel, mode="indeterminate", length=340)
         progress.pack(pady=26)
@@ -379,47 +522,64 @@ class SurveyApp:
         intro.pack(fill="x")
         tk.Label(
             intro,
-            text=f"{len(experiments)} reliable prediction(s)",
+            text=f"Your vibe report has {len(experiments)} good guess(es)",
             bg=BACKGROUND,
             fg=INK,
-            font=("Helvetica", 22, "bold"),
+            font=("Phosphate", 24),
         ).pack(anchor="w")
         tk.Label(
             intro,
-            text="Associations are evidence from this dataset—not facts or causes.",
+            text="Fun patterns from the survey—not destiny, not a personality verdict.",
             bg=BACKGROUND,
             fg=MUTED,
-            font=("Helvetica", 11),
+            font=("Avenir Next", 11),
         ).pack(anchor="w", pady=(7, 0))
 
         if not experiments:
             tk.Label(
                 body,
-                text="The pre-screened relationships did not survive final testing.",
+                text="Plot twist: the promising patterns didn't hold up at the finish line.",
                 bg=BACKGROUND,
                 fg=WARNING,
-                font=("Helvetica", 14, "bold"),
+                font=("Avenir Next", 14, "bold"),
             ).pack(padx=48, pady=30)
 
-        for experiment in experiments:
-            card = tk.Frame(body, bg=CARD, padx=26, pady=22, highlightthickness=1)
-            card.configure(highlightbackground="#d9dedc")
-            card.pack(fill="x", padx=48, pady=9)
+        result_grid = tk.Frame(body, bg=BACKGROUND, padx=40)
+        result_grid.pack(fill="x")
+        result_grid.grid_columnconfigure(0, weight=1, uniform="results")
+        result_grid.grid_columnconfigure(1, weight=1, uniform="results")
+        result_colors = ("#fff3c9", "#e4efe4", "#f8ddd4", "#dcebea", "#f2dce7")
+
+        for index, experiment in enumerate(experiments):
+            result_bg = result_colors[index % len(result_colors)]
             category = question_category(self.survey, experiment.target)
+            category_color = CATEGORY_COLORS.get(category, ACCENT)
+            card = tk.Frame(
+                result_grid,
+                bg=result_bg,
+                padx=22,
+                pady=20,
+                highlightthickness=4,
+                highlightbackground=category_color,
+            )
+            row, column = divmod(index, 2)
+            card.grid(row=row, column=column, sticky="nsew", padx=8, pady=8)
             tk.Label(
                 card,
-                text=category.upper(),
-                bg=CARD,
-                fg=ACCENT,
-                font=("Helvetica", 9, "bold"),
+                text=f"  {category.upper()}  ",
+                bg=category_color,
+                fg="white",
+                font=("Avenir Next", 9, "bold"),
+                padx=4,
+                pady=3,
             ).pack(anchor="w")
             tk.Label(
                 card,
                 text=experiment.target,
-                bg=CARD,
+                bg=result_bg,
                 fg=INK,
-                font=("Helvetica", 15, "bold"),
-                wraplength=800,
+                font=("Avenir Next", 15, "bold"),
+                wraplength=360,
                 justify="left",
             ).pack(anchor="w", pady=(5, 3))
 
@@ -433,21 +593,21 @@ class SurveyApp:
             tk.Label(
                 card,
                 text=value_text,
-                bg=CARD,
-                fg=ACCENT_DARK,
-                font=("Helvetica", 28, "bold"),
+                bg=result_bg,
+                fg=category_color,
+                font=("Phosphate", 31),
             ).pack(anchor="w", pady=(3, 10))
             tk.Label(
                 card,
                 text=(
-                    f"{experiment.model_name}  •  MAE {experiment.test_model_mae:.3f} "
-                    f"vs baseline {experiment.test_baseline_mae:.3f}  •  "
-                    f"{experiment.test_improvement_percent:.1f}% better"
+                    f"BEHIND THE CURTAIN  ·  {experiment.model_name}  ·  "
+                    f"average miss {experiment.test_model_mae:.2f}  ·  "
+                    f"{experiment.test_improvement_percent:.1f}% better than a basic guess"
                 ),
-                bg=CARD,
+                bg=result_bg,
                 fg=MUTED,
-                font=("Helvetica", 10),
-                wraplength=800,
+                font=("Avenir Next", 9, "bold"),
+                wraplength=360,
                 justify="left",
             ).pack(anchor="w")
 
@@ -459,10 +619,10 @@ class SurveyApp:
             ).head(3)
             tk.Label(
                 card,
-                text="Strongest cross-category associations",
-                bg=CARD,
+                text="What connected the dots",
+                bg=result_bg,
                 fg=INK,
-                font=("Helvetica", 10, "bold"),
+                font=("Avenir Next", 11, "bold"),
             ).pack(anchor="w", pady=(15, 5))
             for question, correlation in strongest.items():
                 direction = "positive" if correlation >= 0 else "negative"
@@ -472,10 +632,10 @@ class SurveyApp:
                         f"• {question_category(self.survey, question)}: {question} "
                         f"({direction} {correlation:+.2f})"
                     ),
-                    bg=CARD,
+                    bg=result_bg,
                     fg=MUTED,
-                    font=("Helvetica", 10),
-                    wraplength=800,
+                    font=("Avenir Next", 10),
+                    wraplength=360,
                     justify="left",
                 ).pack(anchor="w", pady=2)
 
@@ -483,13 +643,13 @@ class SurveyApp:
         action.pack(fill="x")
         ttk.Button(
             action,
-            text="Run another experiment",
+            text="Shuffle a new vibe check",
             style="Accent.TButton",
             command=self.start_experiment,
         ).pack(side="right")
 
     def _show_error(self, message: str) -> None:
-        messagebox.showerror("Survey Signals", message)
+        messagebox.showerror("Vibe Check '75", message)
         self.start_experiment()
 
 

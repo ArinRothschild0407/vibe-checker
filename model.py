@@ -491,7 +491,7 @@ def find_predictive_random_group(
             train_rows, question_count=question_count
         ))
         targets = _prediction_targets(df, inputs)
-        screening_results: list[tuple[float, str, str, tuple[str, ...]]] = []
+        screening_results: list[tuple[float, str, tuple[str, ...]]] = []
         for target in targets:
             # Reject near-duplicate prompts even when the source questionnaire
             # placed them in different sections (for example Religion versus
@@ -511,18 +511,18 @@ def find_predictive_random_group(
             )
             if len(model_inputs) < 3:
                 continue
-            model_results: list[tuple[float, str]] = []
-            for model_name, model in make_candidate_models(
-                random_state, fast_screening=True
-            ).items():
-                _, _, gain = _mae_comparison(
-                    model, train_rows, screening_rows, model_inputs, target
-                )
-                model_results.append((gain, model_name))
-            best_gain, best_model_name = max(model_results)
-            screening_results.append(
-                (best_gain, target, best_model_name, model_inputs)
+            # Ridge is extremely fast and works well as a broad first-pass
+            # sorter. The full five-model tournament runs only for finalists.
+            _, _, screening_gain = _mae_comparison(
+                make_candidate_models(
+                    random_state, fast_screening=True
+                )["Ridge"],
+                train_rows,
+                screening_rows,
+                model_inputs,
+                target,
             )
+            screening_results.append((screening_gain, target, model_inputs))
 
         # Only these targets move forward; confirmation did not rank them.
         finalists = sorted(
@@ -534,14 +534,20 @@ def find_predictive_random_group(
         confirmed: list[
             tuple[float, float, str, str, tuple[str, ...]]
         ] = []
-        for screening_gain, target, model_name, model_inputs in finalists:
-            _, _, confirmation_gain = _mae_comparison(
-                make_model_by_name(model_name, random_state),
-                training_and_screening,
-                confirmation_rows,
-                model_inputs,
-                target,
-            )
+        for screening_gain, target, model_inputs in finalists:
+            confirmation_results: list[tuple[float, str]] = []
+            for model_name, model in make_candidate_models(
+                random_state, fast_screening=False
+            ).items():
+                _, _, gain = _mae_comparison(
+                    model,
+                    training_and_screening,
+                    confirmation_rows,
+                    model_inputs,
+                    target,
+                )
+                confirmation_results.append((gain, model_name))
+            confirmation_gain, model_name = max(confirmation_results)
             if (
                 screening_gain >= minimum_improvement_percent
                 and confirmation_gain >= minimum_improvement_percent
