@@ -3,7 +3,7 @@
 from model import (
     find_predictive_random_group,
     load_survey,
-    predict_targets,
+    predict_experiments,
 )
 
 
@@ -105,13 +105,13 @@ def main() -> None:
         print("That negative result is part of the experiment; no guess will be made.")
         return
 
-    targets = [experiment.target for experiment in confirmed]
-    predictions = predict_targets(survey, user_answers, targets)
+    predictions = predict_experiments(survey, user_answers, confirmed)
     print(f"\nReliable predictions found: {len(confirmed)} of {TARGET_COUNT}")
     for experiment in confirmed:
         target_values = survey[experiment.target].dropna()
         suffix = " out of 5" if target_values.between(1, 5).all() else ""
         print(f"\n- {experiment.target}: {predictions[experiment.target]:.2f}{suffix}")
+        print(f"  Winning model: {experiment.model_name}")
         print(
             f"  Final MAE {experiment.test_model_mae:.3f} vs "
             f"baseline {experiment.test_baseline_mae:.3f} "

@@ -12,10 +12,14 @@ from typing import Mapping, Sequence
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import ExtraTreesRegressor, GradientBoostingRegressor
 from sklearn.impute import SimpleImputer
+from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import train_test_split
+from sklearn.neighbors import KNeighborsRegressor
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
 
 @dataclass(frozen=True)
@@ -41,6 +45,7 @@ class PredictionExperiment:
     test_baseline_mae: float
     test_improvement_percent: float
     test_samples: int
+    model_name: str = "Random Forest"
 
 
 @dataclass(frozen=True)
@@ -113,6 +118,61 @@ def make_regression_pipeline(
             )),
         ]
     )
+
+
+def make_candidate_models(
+    random_state: int = 42,
+    *,
+    fast_screening: bool = False,
+) -> dict[str, Pipeline]:
+    """Build leakage-safe candidate models for the model tournament."""
+
+    tree_count = 50 if fast_screening else 150
+    return {
+        "Random Forest": make_regression_pipeline(
+            random_state, n_estimators=tree_count
+        ),
+        "Extra Trees": Pipeline(steps=[
+            ("imputer", SimpleImputer(strategy="median")),
+            ("model", ExtraTreesRegressor(
+                n_estimators=tree_count,
+                min_samples_leaf=3,
+                random_state=random_state,
+                n_jobs=1,
+            )),
+        ]),
+        "Gradient Boosting": Pipeline(steps=[
+            ("imputer", SimpleImputer(strategy="median")),
+            ("model", GradientBoostingRegressor(
+                n_estimators=60 if fast_screening else 120,
+                loss="huber",
+                min_samples_leaf=3,
+                random_state=random_state,
+            )),
+        ]),
+        "KNN": Pipeline(steps=[
+            ("imputer", SimpleImputer(strategy="median")),
+            ("scaler", StandardScaler()),
+            ("model", KNeighborsRegressor(n_neighbors=25, weights="distance")),
+        ]),
+        "Ridge": Pipeline(steps=[
+            ("imputer", SimpleImputer(strategy="median")),
+            ("scaler", StandardScaler()),
+            ("model", Ridge(alpha=10.0)),
+        ]),
+    }
+
+
+def make_model_by_name(
+    model_name: str,
+    random_state: int = 42,
+) -> Pipeline:
+    """Rebuild the selected algorithm for confirmation or prediction."""
+
+    models = make_candidate_models(random_state, fast_screening=False)
+    if model_name not in models:
+        raise ValueError(f"Unknown model: {model_name}")
+    return models[model_name]
 
 
 def _mae_comparison(
@@ -335,28 +395,30 @@ def find_predictive_random_group(
             column for column in df.select_dtypes(include="number").columns
             if column not in inputs
         ]
-        screening_results: list[tuple[float, str]] = []
+        screening_results: list[tuple[float, str, str]] = []
         for target in targets:
-            _, _, gain = _mae_comparison(
-                make_regression_pipeline(
-                    random_state, n_estimators=75
-                ),
-                train_rows,
-                screening_rows,
-                inputs,
-                target,
-            )
-            screening_results.append((gain, target))
+            model_results: list[tuple[float, str]] = []
+            for model_name, model in make_candidate_models(
+                random_state, fast_screening=True
+            ).items():
+                _, _, gain = _mae_comparison(
+                    model, train_rows, screening_rows, inputs, target
+                )
+                model_results.append((gain, model_name))
+            best_gain, best_model_name = max(model_results)
+            screening_results.append((best_gain, target, best_model_name))
 
         # Only these targets move forward; confirmation did not rank them.
-        finalists = sorted(screening_results, reverse=True)[:target_count]
+        finalists = sorted(
+            screening_results, key=lambda item: item[0], reverse=True
+        )[:target_count]
         training_and_screening = df.iloc[
             np.concatenate([train_indices, screening_indices])
         ]
-        confirmed: list[tuple[float, float, str]] = []
-        for screening_gain, target in finalists:
+        confirmed: list[tuple[float, float, str, str]] = []
+        for screening_gain, target, model_name in finalists:
             _, _, confirmation_gain = _mae_comparison(
-                make_regression_pipeline(random_state),
+                make_model_by_name(model_name, random_state),
                 training_and_screening,
                 confirmation_rows,
                 inputs,
@@ -366,7 +428,9 @@ def find_predictive_random_group(
                 screening_gain >= minimum_improvement_percent
                 and confirmation_gain >= minimum_improvement_percent
             ):
-                confirmed.append((screening_gain, confirmation_gain, target))
+                confirmed.append(
+                    (screening_gain, confirmation_gain, target, model_name)
+                )
 
         if len(confirmed) < minimum_confirmed_targets:
             continue
@@ -374,9 +438,9 @@ def find_predictive_random_group(
         # The group qualified without looking at final-test answers.
         final_training_rows = df.iloc[development_indices]
         experiments: list[PredictionExperiment] = []
-        for screening_gain, _, target in confirmed:
+        for screening_gain, _, target, model_name in confirmed:
             model_mae, baseline_mae, final_gain = _mae_comparison(
-                make_regression_pipeline(random_state),
+                make_model_by_name(model_name, random_state),
                 final_training_rows,
                 final_test_rows,
                 inputs,
@@ -390,6 +454,7 @@ def find_predictive_random_group(
                 test_baseline_mae=baseline_mae,
                 test_improvement_percent=final_gain,
                 test_samples=int(final_test_rows[target].notna().sum()),
+                model_name=model_name,
             ))
         return QuestionGroupSearch(
             input_questions=inputs,
@@ -550,6 +615,26 @@ def predict_targets(
         model.fit(training_rows[inputs], training_rows[target])
         predictions[target] = float(model.predict(user_row)[0])
 
+    return predictions
+
+
+def predict_experiments(
+    df: pd.DataFrame,
+    user_answers: Mapping[str, float],
+    experiments: Sequence[PredictionExperiment],
+    *,
+    random_state: int = 42,
+) -> dict[str, float]:
+    """Predict with the same algorithm that won each target's tournament."""
+
+    inputs = _validate_inputs(df, list(user_answers))
+    user_row = pd.DataFrame([[user_answers[c] for c in inputs]], columns=inputs)
+    predictions: dict[str, float] = {}
+    for experiment in experiments:
+        training_rows = df[df[experiment.target].notna()]
+        model = make_model_by_name(experiment.model_name, random_state)
+        model.fit(training_rows[inputs], training_rows[experiment.target])
+        predictions[experiment.target] = float(model.predict(user_row)[0])
     return predictions
 
 
