@@ -5,6 +5,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.impute import SimpleImputer
 #used to convert categorical.text asnwers into numeric columns
 from sklearn.preprocessing import OneHotEncoder
+from sklearn.ensemble import RandomForestRegressor 
+from sklearn.metrics import mean_absolute_error
 
 df = pd.read_csv("data/responses.csv")
 
@@ -83,3 +85,35 @@ X_test_processed = np.hstack([
     X_test_numeric,
     X_test_categorical_encoded
 ])
+
+#create Random forest regression model
+model = RandomForestRegressor(
+    n_estimators = 100,
+    random_state = 42
+)
+
+#train model using training ppls survey info X and known rock ratings y
+model.fit(X_train_processed, y_train)
+
+#predict rock ratings for test ppl, ppl not used to train the model
+y_pred = model.predict(X_test_processed)
+
+#calc mae for random forest to see how many points away from rating
+model_mae = mean_absolute_error(y_test, y_pred)
+
+print("\nRandom Forest MAE:", round(model_mae, 3))
+
+# Create a baseline prediction.
+# This "dumb" model predicts the average Rock rating from the training
+# people for EVERY person in the test set.
+baseline_prediction = y_train.mean()
+
+baseline_pred = np.full(
+    len(y_test),
+    baseline_prediction
+)
+
+baseline_mae = mean_absolute_error(y_test, baseline_pred)
+
+print("Baseline prediction:", round(baseline_prediction, 3))
+print("Baseline MAE:", round(baseline_mae, 3))
