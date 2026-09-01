@@ -59,10 +59,23 @@ class SurveyApp:
         self.survey_columns = list(self.survey.columns)
         self.search = None
         self.answer_variables: dict[str, tk.IntVar] = {}
+        self.active_canvas: tk.Canvas | None = None
 
         self._configure_styles()
         self._build_shell()
+        self.root.bind_all("<MouseWheel>", self._scroll_wheel)
+        self.root.bind_all("<Button-4>", self._scroll_linux)
+        self.root.bind_all("<Button-5>", self._scroll_linux)
+        self.root.after(100, self._bring_to_front)
         self.start_experiment()
+
+    def _bring_to_front(self) -> None:
+        """Make a newly launched GUI visible instead of hiding behind the terminal."""
+
+        self.root.lift()
+        self.root.attributes("-topmost", True)
+        self.root.focus_force()
+        self.root.after(800, lambda: self.root.attributes("-topmost", False))
 
     def _configure_styles(self) -> None:
         style = ttk.Style()
@@ -108,8 +121,22 @@ class SurveyApp:
         self.content.pack(fill="both", expand=True)
 
     def _clear_content(self) -> None:
+        self.active_canvas = None
         for child in self.content.winfo_children():
             child.destroy()
+
+    def _scroll_wheel(self, event) -> str | None:
+        if self.active_canvas is not None and event.delta:
+            direction = -1 if event.delta > 0 else 1
+            self.active_canvas.yview_scroll(direction * 3, "units")
+            return "break"
+        return None
+
+    def _scroll_linux(self, event) -> str | None:
+        if self.active_canvas is not None:
+            self.active_canvas.yview_scroll(-3 if event.num == 4 else 3, "units")
+            return "break"
+        return None
 
     def start_experiment(self) -> None:
         self._clear_content()
@@ -214,6 +241,7 @@ class SurveyApp:
             lambda event: canvas.itemconfigure(window, width=event.width),
         )
         canvas.configure(yscrollcommand=scrollbar.set)
+        self.active_canvas = canvas
         scrollbar.pack(side="right", fill="y")
         canvas.pack(side="left", fill="both", expand=True)
         return canvas, body

@@ -493,6 +493,15 @@ def find_predictive_random_group(
         targets = _prediction_targets(df, inputs)
         screening_results: list[tuple[float, str, str, tuple[str, ...]]] = []
         for target in targets:
+            # Reject near-duplicate prompts even when the source questionnaire
+            # placed them in different sections (for example Religion versus
+            # "I believe in God"). Those are accurate but uninteresting guesses.
+            input_target_correlations = train_rows[list(inputs)].corrwith(
+                train_rows[target], method="spearman"
+            ).abs().fillna(0.0)
+            if input_target_correlations.max() >= 0.50:
+                continue
+
             # This deliberately prevents same-section shortcuts. A movie target,
             # for example, may use music/interests/personality but not movie inputs.
             target_category = question_category(df, target)
