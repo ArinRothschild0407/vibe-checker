@@ -1,119 +1,188 @@
-import pandas as pd
+"""Reusable ML experiments for the Young People Survey.
+
+An experiment only uses ``input_columns``. If the game asks five questions,
+evaluation uses those same five answers, never the rest of a survey row.
+"""
+
+from dataclasses import dataclass
+from typing import Mapping, Sequence
+
 import numpy as np
-from sklearn.model_selection import train_test_split
-#used to fill in missing values
+import pandas as pd
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.impute import SimpleImputer
-#used to convert categorical.text asnwers into numeric columns
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.ensemble import RandomForestRegressor 
 from sklearn.metrics import mean_absolute_error
-
-df = pd.read_csv("data/responses.csv")
-
-#temp target
-target = "Rock"
-
-#define target and features used for prediction
-y = df[target]
-X = df.drop(columns=[target])
-
-#split the traning and testing groups 
-X_train, X_test, y_train, y_test = train_test_split(
-    X,
-    y,
-    test_size = 0.2,
-    random_state =42
-)
-
-# Remove people whose target answer is missing.
-train_valid = y_train.notna()
-test_valid = y_test.notna()
-
-X_train = X_train[train_valid]
-y_train = y_train[train_valid]
-
-X_test = X_test[test_valid]
-y_test = y_test[test_valid]
-
-#seperate numeric columns from text/categorical columns
-numeric_columns = X_train.select_dtypes(include="number").columns
-categorical_columns = X_train.select_dtypes(exclude='number').columns
-
-# print("\nNumeric columns:", len(numeric_columns))
-# print("Categorical columns:", len(categorical_columns))
-
-#create imputer that replaces missing numeric values with median from training data
-numeric_imputer = SimpleImputer(strategy='median')
-
-#get median of each numerical column using only training set
-numeric_imputer.fit(X_train[numeric_columns])
-
-#use learned medians to fill missing numeric values 
-X_train_numeric = numeric_imputer.transform(X_train[numeric_columns])
-X_test_numeric = numeric_imputer.transform(X_test[numeric_columns])
-
-#create imputer for categorical columns
-#missing categorical asnwers will be filled in with the most common answer in the training data
-categorical_imputer = SimpleImputer(strategy="most_frequent")
-
-categorical_imputer.fit(X_train[categorical_columns])
-
-X_train_categorical = categorical_imputer.transform(
-    X_train[categorical_columns]
-)
-
-X_test_categorical = categorical_imputer.transform(X_test[categorical_columns])
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
 
 
-#convert categorical snwers into numerical 0/1 columns
-encoder = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
+@dataclass(frozen=True)
+class TargetResult:
+    """Held-out performance for one possible prediction target."""
 
-#learn which categories exist using only the training data
-encoder.fit(X_train_categorical)
+    target: str
+    model_mae: float
+    baseline_mae: float
+    improvement: float
+    improvement_percent: float
+    test_samples: int
 
-#convert categorical training and testing data into numbers
-X_train_categorical_encoded = encoder.transform(X_train_categorical)
-X_test_categorical_encoded = encoder.transform(X_test_categorical)
 
-#combine cleaned numeric features and encoded categorical features into one complete input matrix for ML model
-X_train_processed = np.hstack([
-    X_train_numeric,
-    X_train_categorical_encoded
-])
+def load_survey(path: str = "data/responses.csv") -> pd.DataFrame:
+    return pd.read_csv(path)
 
-X_test_processed = np.hstack([
-    X_test_numeric,
-    X_test_categorical_encoded
-])
 
-#create Random forest regression model
-model = RandomForestRegressor(
-    n_estimators = 100,
-    random_state = 42
-)
+def _validate_inputs(df: pd.DataFrame, input_columns: Sequence[str]) -> list[str]:
+    columns = list(input_columns)
+    if not columns:
+        raise ValueError("At least one input question is required.")
+    if len(columns) != len(set(columns)):
+        raise ValueError("Input questions must not contain duplicates.")
+    missing = [column for column in columns if column not in df.columns]
+    if missing:
+        raise ValueError(f"Unknown input question(s): {missing}")
+    non_numeric = [
+        column for column in columns
+        if not pd.api.types.is_numeric_dtype(df[column])
+    ]
+    if non_numeric:
+        raise ValueError(
+            "This first version supports numeric input questions only. "
+            f"Non-numeric question(s): {non_numeric}"
+        )
+    return columns
 
-#train model using training ppls survey info X and known rock ratings y
-model.fit(X_train_processed, y_train)
 
-#predict rock ratings for test ppl, ppl not used to train the model
-y_pred = model.predict(X_test_processed)
+def make_regression_pipeline(random_state: int = 42) -> Pipeline:
+    """Build preprocessing and model as one leakage-safe pipeline."""
 
-#calc mae for random forest to see how many points away from rating
-model_mae = mean_absolute_error(y_test, y_pred)
+    # Pipeline.fit learns imputation medians from training participants only.
+    # Random forests do not require feature scaling.
+    return Pipeline(
+        steps=[
+            ("imputer", SimpleImputer(strategy="median")),
+            ("model", RandomForestRegressor(
+                n_estimators=150,
+                min_samples_leaf=3,
+                random_state=random_state,
+                n_jobs=-1,
+            )),
+        ]
+    )
 
-print("\nRandom Forest MAE:", round(model_mae, 3))
 
-# Create a baseline prediction.
-# This "dumb" model predicts the average Rock rating from the training
-# people for EVERY person in the test set.
-baseline_prediction = y_train.mean()
+def evaluate_numeric_targets(
+    df: pd.DataFrame,
+    input_columns: Sequence[str],
+    *,
+    test_size: float = 0.2,
+    random_state: int = 42,
+) -> list[TargetResult]:
+    """Rank unanswered numeric targets by held-out gain over baseline.
 
-baseline_pred = np.full(
-    len(y_test),
-    baseline_prediction
-)
+    One participant split is reused for every target. Missing target answers are
+    omitted for that target only. The baseline predicts the training median,
+    which is the appropriate constant prediction when measuring MAE.
+    """
 
-baseline_mae = mean_absolute_error(y_test, baseline_pred)
+    inputs = _validate_inputs(df, input_columns)
+    numeric_targets = [
+        column for column in df.select_dtypes(include="number").columns
+        if column not in inputs
+    ]
+    train_indices, test_indices = train_test_split(
+        np.arange(len(df)), test_size=test_size, random_state=random_state
+    )
+    results: list[TargetResult] = []
 
-print("Baseline prediction:", round(baseline_prediction, 3))
-print("Baseline MAE:", round(baseline_mae, 3))
+    for target in numeric_targets:
+        train_rows = df.iloc[train_indices]
+        test_rows = df.iloc[test_indices]
+        # A missing target cannot teach the model or be used to score it.
+        train_rows = train_rows[train_rows[target].notna()]
+        test_rows = test_rows[test_rows[target].notna()]
+        if train_rows.empty or test_rows.empty:
+            continue
+
+        model = make_regression_pipeline(random_state)
+        model.fit(train_rows[inputs], train_rows[target])
+        model_mae = mean_absolute_error(
+            test_rows[target], model.predict(test_rows[inputs])
+        )
+
+        baseline_value = train_rows[target].median()
+        baseline_mae = mean_absolute_error(
+            test_rows[target], np.full(len(test_rows), baseline_value)
+        )
+        improvement = baseline_mae - model_mae
+        improvement_percent = (
+            100.0 * improvement / baseline_mae if baseline_mae > 0 else 0.0
+        )
+        results.append(TargetResult(
+            target=target,
+            model_mae=model_mae,
+            baseline_mae=baseline_mae,
+            improvement=improvement,
+            improvement_percent=improvement_percent,
+            test_samples=len(test_rows),
+        ))
+
+    # Percentage gain makes targets with different scales comparable. For
+    # example, a one-kilogram gain is not equivalent to a one-point rating gain.
+    return sorted(
+        results, key=lambda result: result.improvement_percent, reverse=True
+    )
+
+
+def predict_targets(
+    df: pd.DataFrame,
+    user_answers: Mapping[str, float],
+    targets: Sequence[str],
+    *,
+    random_state: int = 42,
+) -> dict[str, float]:
+    """Refit selected targets on all participants and predict the user.
+
+    Target selection happens separately on held-out data. Only after that honest
+    test do we use all available rows to fit the final prediction model.
+    """
+
+    inputs = _validate_inputs(df, list(user_answers))
+    user_row = pd.DataFrame([[user_answers[c] for c in inputs]], columns=inputs)
+    predictions: dict[str, float] = {}
+
+    for target in targets:
+        if target in inputs or target not in df.columns:
+            raise ValueError(f"Invalid prediction target: {target}")
+        if not pd.api.types.is_numeric_dtype(df[target]):
+            raise ValueError(f"Target is not numeric: {target}")
+        training_rows = df[df[target].notna()]
+        model = make_regression_pipeline(random_state)
+        model.fit(training_rows[inputs], training_rows[target])
+        predictions[target] = float(model.predict(user_row)[0])
+
+    return predictions
+
+
+def print_ranking(results: Sequence[TargetResult], limit: int = 10) -> None:
+    """Print a compact experiment table."""
+
+    print(f"{'Target':30} {'Model MAE':>10} {'Baseline':>10} {'Gain':>9} {'Gain %':>8}")
+    print("-" * 72)
+    for result in results[:limit]:
+        print(
+            f"{result.target[:30]:30} {result.model_mae:10.3f} "
+            f"{result.baseline_mae:10.3f} {result.improvement:9.3f} "
+            f"{result.improvement_percent:7.1f}%"
+        )
+
+
+if __name__ == "__main__":
+    survey = load_survey()
+    example_inputs = [
+        "Rock", "Horror", "Reading", "Countryside, outdoors", "Spending on gadgets"
+    ]
+    ranking = evaluate_numeric_targets(survey, example_inputs)
+    print("\nBest targets using exactly these five inputs:")
+    print(", ".join(example_inputs))
+    print_ranking(ranking)
