@@ -1,16 +1,18 @@
 """Interactive game: random questions followed by evidence-based predictions."""
 
 from model import (
-    choose_random_questions,
-    evaluate_question_group,
+    find_predictive_random_group,
     load_survey,
     predict_targets,
 )
 
 
 MIN_IMPROVEMENT_PERCENT = 5.0
-QUESTION_COUNT = 5
+QUALIFYING_IMPROVEMENT_PERCENT = 10.0
+QUESTION_COUNT = 10
 TARGET_COUNT = 5
+MIN_CONFIRMED_TARGETS = 3
+MAX_GROUP_ATTEMPTS = 10
 
 
 def question_scale(question: str, survey_columns: list[str]) -> str:
@@ -52,27 +54,46 @@ def ask_rating(question: str, survey_columns: list[str]) -> int:
 def main() -> None:
     survey = load_survey()
     survey_columns = list(survey.columns)
-    game_questions = choose_random_questions(
-        survey, question_count=QUESTION_COUNT
+    print("\nSearching for a useful random 10-question group...")
+    search = find_predictive_random_group(
+        survey,
+        question_count=QUESTION_COUNT,
+        target_count=TARGET_COUNT,
+        minimum_confirmed_targets=MIN_CONFIRMED_TARGETS,
+        minimum_improvement_percent=QUALIFYING_IMPROVEMENT_PERCENT,
+        max_attempts=MAX_GROUP_ATTEMPTS,
     )
+    if search is None:
+        print(
+            f"No random group predicted at least {MIN_CONFIRMED_TARGETS} "
+            f"targets after {MAX_GROUP_ATTEMPTS} attempts."
+        )
+        print("Try running the experiment again; no unsupported guesses were made.")
+        return
+    game_questions = list(search.input_questions)
 
     print("\n===============================")
     print("  SURVEY PREDICTION EXPERIMENT")
     print("===============================")
-    print("\nThis run randomly selected these five questions:")
+    print(
+        f"\nFound a qualifying random group after {search.attempts} attempt(s)."
+    )
+    print(
+        "These 10 questions predicted at least three targets during both "
+        "screening and confirmation:"
+    )
     for question in game_questions:
         print(f"- {question}")
 
-    print("\nAnswer the five questions using the scale shown.\n")
+    print("\nAnswer the 10 questions using the scale shown.\n")
     user_answers = {
         question: ask_rating(question, survey_columns)
         for question in game_questions
     }
 
-    print("\nTesting what this exact random group predicts...")
-    experiments = evaluate_question_group(
-        survey, game_questions, target_count=TARGET_COUNT
-    )
+    # Final-test results were computed only after this group passed screening
+    # and confirmation; they determine which predictions are safe to display.
+    experiments = search.experiments
     confirmed = [
         experiment for experiment in experiments
         if experiment.validation_improvement_percent > 0

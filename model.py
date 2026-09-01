@@ -43,6 +43,16 @@ class PredictionExperiment:
     test_samples: int
 
 
+@dataclass(frozen=True)
+class QuestionGroupSearch:
+    """A random question group that passed pre-game confirmation."""
+
+    input_questions: tuple[str, ...]
+    experiments: tuple[PredictionExperiment, ...]
+    attempts: int
+    confirmed_before_final_test: int
+
+
 def load_survey(path: str = "data/responses.csv") -> pd.DataFrame:
     """Load responses and replace every shortened name with original wording."""
 
@@ -81,7 +91,11 @@ def _validate_inputs(df: pd.DataFrame, input_columns: Sequence[str]) -> list[str
     return columns
 
 
-def make_regression_pipeline(random_state: int = 42) -> Pipeline:
+def make_regression_pipeline(
+    random_state: int = 42,
+    *,
+    n_estimators: int = 150,
+) -> Pipeline:
     """Build preprocessing and model as one leakage-safe pipeline."""
 
     # Pipeline.fit learns imputation medians from training participants only.
@@ -90,10 +104,12 @@ def make_regression_pipeline(random_state: int = 42) -> Pipeline:
         steps=[
             ("imputer", SimpleImputer(strategy="median")),
             ("model", RandomForestRegressor(
-                n_estimators=150,
+                n_estimators=n_estimators,
                 min_samples_leaf=3,
                 random_state=random_state,
-                n_jobs=-1,
+                # This dataset is small. One worker avoids noisy joblib warnings
+                # seen with this project's Python/scikit-learn combination.
+                n_jobs=1,
             )),
         ]
     )
@@ -281,6 +297,110 @@ def evaluate_question_group(
     return experiments
 
 
+def find_predictive_random_group(
+    df: pd.DataFrame,
+    *,
+    question_count: int = 10,
+    target_count: int = 5,
+    minimum_confirmed_targets: int = 3,
+    minimum_improvement_percent: float = 5.0,
+    max_attempts: int = 10,
+    random_state: int = 42,
+) -> QuestionGroupSearch | None:
+    """Search random groups before the player is asked any questions.
+
+    Data roles are kept separate: training fits models, screening ranks targets,
+    confirmation decides whether a random group is worth asking, and final test
+    estimates the selected group's performance on untouched participants.
+    """
+
+    all_indices = np.arange(len(df))
+    development_indices, final_test_indices = train_test_split(
+        all_indices, test_size=0.2, random_state=random_state
+    )
+    train_indices, selection_indices = train_test_split(
+        development_indices, test_size=0.375, random_state=random_state
+    )
+    screening_indices, confirmation_indices = train_test_split(
+        selection_indices, test_size=0.5, random_state=random_state
+    )
+    train_rows = df.iloc[train_indices]
+    screening_rows = df.iloc[screening_indices]
+    confirmation_rows = df.iloc[confirmation_indices]
+    final_test_rows = df.iloc[final_test_indices]
+
+    for attempt in range(1, max_attempts + 1):
+        inputs = tuple(choose_random_questions(df, question_count=question_count))
+        targets = [
+            column for column in df.select_dtypes(include="number").columns
+            if column not in inputs
+        ]
+        screening_results: list[tuple[float, str]] = []
+        for target in targets:
+            _, _, gain = _mae_comparison(
+                make_regression_pipeline(
+                    random_state, n_estimators=75
+                ),
+                train_rows,
+                screening_rows,
+                inputs,
+                target,
+            )
+            screening_results.append((gain, target))
+
+        # Only these targets move forward; confirmation did not rank them.
+        finalists = sorted(screening_results, reverse=True)[:target_count]
+        training_and_screening = df.iloc[
+            np.concatenate([train_indices, screening_indices])
+        ]
+        confirmed: list[tuple[float, float, str]] = []
+        for screening_gain, target in finalists:
+            _, _, confirmation_gain = _mae_comparison(
+                make_regression_pipeline(random_state),
+                training_and_screening,
+                confirmation_rows,
+                inputs,
+                target,
+            )
+            if (
+                screening_gain >= minimum_improvement_percent
+                and confirmation_gain >= minimum_improvement_percent
+            ):
+                confirmed.append((screening_gain, confirmation_gain, target))
+
+        if len(confirmed) < minimum_confirmed_targets:
+            continue
+
+        # The group qualified without looking at final-test answers.
+        final_training_rows = df.iloc[development_indices]
+        experiments: list[PredictionExperiment] = []
+        for screening_gain, _, target in confirmed:
+            model_mae, baseline_mae, final_gain = _mae_comparison(
+                make_regression_pipeline(random_state),
+                final_training_rows,
+                final_test_rows,
+                inputs,
+                target,
+            )
+            experiments.append(PredictionExperiment(
+                target=target,
+                input_questions=inputs,
+                validation_improvement_percent=screening_gain,
+                test_model_mae=model_mae,
+                test_baseline_mae=baseline_mae,
+                test_improvement_percent=final_gain,
+                test_samples=int(final_test_rows[target].notna().sum()),
+            ))
+        return QuestionGroupSearch(
+            input_questions=inputs,
+            experiments=tuple(experiments),
+            attempts=attempt,
+            confirmed_before_final_test=len(confirmed),
+        )
+
+    return None
+
+
 def discover_input_questions(
     df: pd.DataFrame,
     *,
@@ -447,13 +567,16 @@ def print_ranking(results: Sequence[TargetResult], limit: int = 10) -> None:
 
 if __name__ == "__main__":
     survey = load_survey()
-    random_questions = choose_random_questions(survey, question_count=5)
-    experiments = evaluate_question_group(survey, random_questions, target_count=5)
-    print("\nRandomly selected questions:")
-    for question in random_questions:
+    search = find_predictive_random_group(
+        survey, question_count=10, minimum_improvement_percent=10.0
+    )
+    if search is None:
+        raise SystemExit("No qualifying random group found.")
+    print(f"\nQualifying group found after {search.attempts} attempt(s):")
+    for question in search.input_questions:
         print(f"- {question}")
-    print("\nTop targets selected on validation and checked on final test:")
-    for experiment in experiments:
+    print("\nConfirmed targets checked on final test:")
+    for experiment in search.experiments:
         print(f"- {experiment.target}")
         print(
             f"  Validation gain: {experiment.validation_improvement_percent:.1f}% | "
