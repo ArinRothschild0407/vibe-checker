@@ -71,6 +71,65 @@ def make_regression_pipeline(random_state: int = 42) -> Pipeline:
     )
 
 
+def discover_input_questions(
+    df: pd.DataFrame,
+    *,
+    question_count: int = 5,
+    test_size: float = 0.2,
+    random_state: int = 42,
+) -> list[str]:
+    """Choose broadly informative 1-5 questions without looking at test people.
+
+    We greedily choose questions that give the best correlation coverage across
+    the other 1-5 survey responses. After one question is selected, later choices
+    are rewarded for explaining responses the existing questions do not already
+    cover. This is a simple, understandable first question-selection strategy.
+
+    Correlation only selects the inputs. Random Forest performance on untouched
+    test participants still decides whether those inputs truly predict a target.
+    """
+
+    if question_count < 1:
+        raise ValueError("question_count must be at least 1.")
+
+    train_indices, _ = train_test_split(
+        np.arange(len(df)), test_size=test_size, random_state=random_state
+    )
+    discovery_rows = df.iloc[train_indices]
+
+    # The game currently accepts 1-5 ratings, so age, height, weight, and other
+    # differently-scaled numeric columns are not eligible input questions.
+    candidates = [
+        column
+        for column in discovery_rows.select_dtypes(include="number").columns
+        if discovery_rows[column].dropna().between(1, 5).all()
+    ]
+    if question_count > len(candidates):
+        raise ValueError("Not enough 1-5 numeric questions in the dataset.")
+
+    # Spearman correlation works with ordered ratings and does not assume that
+    # the relationship must be perfectly linear.
+    correlations = discovery_rows[candidates].corr(method="spearman").abs()
+    diagonal = np.eye(len(correlations), dtype=bool)
+    correlations = correlations.mask(diagonal, 0.0).fillna(0.0)
+
+    selected: list[str] = []
+    current_coverage = pd.Series(0.0, index=candidates)
+    for _ in range(question_count):
+        best_question = max(
+            (question for question in candidates if question not in selected),
+            key=lambda question: np.maximum(
+                current_coverage, correlations[question]
+            ).mean(),
+        )
+        selected.append(best_question)
+        current_coverage = np.maximum(
+            current_coverage, correlations[best_question]
+        )
+
+    return selected
+
+
 def evaluate_numeric_targets(
     df: pd.DataFrame,
     input_columns: Sequence[str],
@@ -179,10 +238,8 @@ def print_ranking(results: Sequence[TargetResult], limit: int = 10) -> None:
 
 if __name__ == "__main__":
     survey = load_survey()
-    example_inputs = [
-        "Rock", "Horror", "Reading", "Countryside, outdoors", "Spending on gadgets"
-    ]
-    ranking = evaluate_numeric_targets(survey, example_inputs)
-    print("\nBest targets using exactly these five inputs:")
-    print(", ".join(example_inputs))
+    discovered_inputs = discover_input_questions(survey)
+    ranking = evaluate_numeric_targets(survey, discovered_inputs)
+    print("\nFive questions selected from training data:")
+    print(", ".join(discovered_inputs))
     print_ranking(ranking)
