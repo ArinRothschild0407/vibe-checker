@@ -4,6 +4,7 @@ from model import (
     find_predictive_random_group,
     load_survey,
     predict_experiments,
+    question_category,
 )
 
 
@@ -54,7 +55,7 @@ def ask_rating(question: str, survey_columns: list[str]) -> int:
 def main() -> None:
     survey = load_survey()
     survey_columns = list(survey.columns)
-    print("\nSearching for a useful random 10-question group...")
+    print("\nSearching for a useful data-guided 10-question group...")
     search = find_predictive_random_group(
         survey,
         question_count=QUESTION_COUNT,
@@ -75,15 +76,13 @@ def main() -> None:
     print("\n===============================")
     print("  SURVEY PREDICTION EXPERIMENT")
     print("===============================")
-    print(
-        f"\nFound a qualifying random group after {search.attempts} attempt(s)."
-    )
+    print(f"\nFound a qualifying guided group after {search.attempts} attempt(s).")
     print(
         "These 10 questions predicted at least three targets during both "
         "screening and confirmation:"
     )
     for question in game_questions:
-        print(f"- {question}")
+        print(f"- [{question_category(survey, question)}] {question}")
 
     print("\nAnswer the 10 questions using the scale shown.\n")
     user_answers = {
@@ -109,14 +108,33 @@ def main() -> None:
     print(f"\nReliable predictions found: {len(confirmed)} of {TARGET_COUNT}")
     for experiment in confirmed:
         target_values = survey[experiment.target].dropna()
-        suffix = " out of 5" if target_values.between(1, 5).all() else ""
+        if target_values.between(1, 5).all():
+            suffix = " out of 5"
+        elif experiment.target == "Age":
+            suffix = " years"
+        else:
+            suffix = ""
         print(f"\n- {experiment.target}: {predictions[experiment.target]:.2f}{suffix}")
+        print(f"  Target category: {question_category(survey, experiment.target)}")
         print(f"  Winning model: {experiment.model_name}")
         print(
             f"  Final MAE {experiment.test_model_mae:.3f} vs "
             f"baseline {experiment.test_baseline_mae:.3f} "
             f"({experiment.test_improvement_percent:.1f}% better)"
         )
+        correlations = survey[list(experiment.input_questions)].corrwith(
+            survey[experiment.target], method="spearman"
+        ).dropna()
+        strongest = correlations.reindex(
+            correlations.abs().sort_values(ascending=False).index
+        ).head(3)
+        print("  Strongest cross-category associations:")
+        for question, correlation in strongest.items():
+            direction = "positive" if correlation >= 0 else "negative"
+            print(
+                f"  - {question_category(survey, question)}: {question} "
+                f"({direction}, correlation {correlation:+.2f})"
+            )
     print("\nThese are statistical estimates, not facts about you.")
 
 

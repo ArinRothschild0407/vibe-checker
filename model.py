@@ -58,6 +58,24 @@ class QuestionGroupSearch:
     confirmed_before_final_test: int
 
 
+# Physical measurements are deliberately outside the prediction game. Even when
+# statistically predictable, guessing them is intrusive and not useful here.
+EXCLUDED_PREDICTION_TARGETS = {"Height", "Weight"}
+
+
+def _prediction_targets(
+    df: pd.DataFrame,
+    input_questions: Sequence[str] = (),
+) -> list[str]:
+    """Return allowed numeric targets that the player has not answered."""
+
+    inputs = set(input_questions)
+    return [
+        column for column in df.select_dtypes(include="number").columns
+        if column not in inputs and column not in EXCLUDED_PREDICTION_TARGETS
+    ]
+
+
 def load_survey(path: str = "data/responses.csv") -> pd.DataFrame:
     """Load responses and replace every shortened name with original wording."""
 
@@ -73,6 +91,34 @@ def load_survey(path: str = "data/responses.csv") -> pd.DataFrame:
             f"{sorted(missing_metadata)}"
         )
     return survey.rename(columns=short_to_original)
+
+
+def question_category(df: pd.DataFrame, question: str) -> str:
+    """Map an original survey question to its questionnaire section."""
+
+    columns = list(df.columns)
+    position = columns.index(question)
+    boundaries = [
+        ("Music", "I enjoy listening to music.", "Opera"),
+        ("Movies", "I really enjoy watching movies.", "Action movies"),
+        ("Interests", "History", "Pets"),
+        ("Fears", "Flying", "Public speaking"),
+        (
+            "Personality and lifestyle",
+            "I live a very healthy lifestyle.",
+            "I enjoy taking part in surveys.",
+        ),
+        (
+            "Spending",
+            "I save all the money I can.",
+            "I will hapilly pay more money for good, quality or healthy food.",
+        ),
+        ("Demographics", "Age", "I lived most of my childhood in a"),
+    ]
+    for category, first, last in boundaries:
+        if columns.index(first) <= position <= columns.index(last):
+            return category
+    raise ValueError(f"No category found for question: {question}")
 
 
 def _validate_inputs(df: pd.DataFrame, input_columns: Sequence[str]) -> list[str]:
@@ -224,7 +270,7 @@ def discover_best_prediction_experiment(
     validation_rows = df.iloc[validation_indices]
     test_rows = df.iloc[test_indices]
 
-    numeric_targets = list(df.select_dtypes(include="number").columns)
+    numeric_targets = _prediction_targets(df)
     # Inputs must be questions a player can answer on a 1-5 scale.
     candidate_inputs = [
         column
@@ -293,6 +339,60 @@ def choose_random_questions(
     return SystemRandom().sample(candidates, question_count)
 
 
+def choose_guided_questions(
+    discovery_rows: pd.DataFrame,
+    *,
+    question_count: int = 10,
+    pool_size: int = 40,
+    max_per_category: int = 2,
+    redundancy_limit: float = 0.55,
+) -> list[str]:
+    """Randomly sample diverse questions with cross-category information.
+
+    Scores and correlations are calculated only from the discovery rows passed
+    by the caller. Sampling from the high-scoring pool keeps games varied.
+    """
+
+    candidates = [
+        column
+        for column in discovery_rows.select_dtypes(include="number").columns
+        if discovery_rows[column].dropna().between(1, 5).all()
+    ]
+    correlations = discovery_rows[candidates].corr(method="spearman").fillna(0.0)
+    scores: dict[str, float] = {}
+    for question in candidates:
+        category = question_category(discovery_rows, question)
+        cross_category = [
+            other for other in candidates
+            if other != question
+            and question_category(discovery_rows, other) != category
+        ]
+        strongest = correlations.loc[question, cross_category].abs().nlargest(5)
+        scores[question] = float(strongest.mean())
+
+    pool = sorted(candidates, key=scores.get, reverse=True)[:pool_size]
+    rng = SystemRandom()
+    selected: list[str] = []
+    category_counts: dict[str, int] = {}
+    while len(selected) < question_count:
+        eligible = []
+        for question in pool:
+            category = question_category(discovery_rows, question)
+            if question in selected or category_counts.get(category, 0) >= max_per_category:
+                continue
+            if selected and correlations.loc[question, selected].abs().max() >= redundancy_limit:
+                continue
+            eligible.append(question)
+        if not eligible:
+            raise ValueError("Could not construct a diverse guided question group.")
+        weights = [max(scores[question], 0.001) ** 2 for question in eligible]
+        question = rng.choices(eligible, weights=weights, k=1)[0]
+        selected.append(question)
+        category = question_category(discovery_rows, question)
+        category_counts[category] = category_counts.get(category, 0) + 1
+    return selected
+
+
 def evaluate_question_group(
     df: pd.DataFrame,
     input_questions: Sequence[str],
@@ -319,10 +419,7 @@ def evaluate_question_group(
     test_rows = df.iloc[test_indices]
 
     validation_results: list[tuple[float, str]] = []
-    targets = [
-        column for column in df.select_dtypes(include="number").columns
-        if column not in inputs
-    ]
+    targets = _prediction_targets(df, inputs)
     for target in targets:
         _, _, validation_gain = _mae_comparison(
             make_regression_pipeline(random_state),
@@ -390,23 +487,33 @@ def find_predictive_random_group(
     final_test_rows = df.iloc[final_test_indices]
 
     for attempt in range(1, max_attempts + 1):
-        inputs = tuple(choose_random_questions(df, question_count=question_count))
-        targets = [
-            column for column in df.select_dtypes(include="number").columns
-            if column not in inputs
-        ]
-        screening_results: list[tuple[float, str, str]] = []
+        inputs = tuple(choose_guided_questions(
+            train_rows, question_count=question_count
+        ))
+        targets = _prediction_targets(df, inputs)
+        screening_results: list[tuple[float, str, str, tuple[str, ...]]] = []
         for target in targets:
+            # This deliberately prevents same-section shortcuts. A movie target,
+            # for example, may use music/interests/personality but not movie inputs.
+            target_category = question_category(df, target)
+            model_inputs = tuple(
+                question for question in inputs
+                if question_category(df, question) != target_category
+            )
+            if len(model_inputs) < 3:
+                continue
             model_results: list[tuple[float, str]] = []
             for model_name, model in make_candidate_models(
                 random_state, fast_screening=True
             ).items():
                 _, _, gain = _mae_comparison(
-                    model, train_rows, screening_rows, inputs, target
+                    model, train_rows, screening_rows, model_inputs, target
                 )
                 model_results.append((gain, model_name))
             best_gain, best_model_name = max(model_results)
-            screening_results.append((best_gain, target, best_model_name))
+            screening_results.append(
+                (best_gain, target, best_model_name, model_inputs)
+            )
 
         # Only these targets move forward; confirmation did not rank them.
         finalists = sorted(
@@ -415,13 +522,15 @@ def find_predictive_random_group(
         training_and_screening = df.iloc[
             np.concatenate([train_indices, screening_indices])
         ]
-        confirmed: list[tuple[float, float, str, str]] = []
-        for screening_gain, target, model_name in finalists:
+        confirmed: list[
+            tuple[float, float, str, str, tuple[str, ...]]
+        ] = []
+        for screening_gain, target, model_name, model_inputs in finalists:
             _, _, confirmation_gain = _mae_comparison(
                 make_model_by_name(model_name, random_state),
                 training_and_screening,
                 confirmation_rows,
-                inputs,
+                model_inputs,
                 target,
             )
             if (
@@ -429,7 +538,13 @@ def find_predictive_random_group(
                 and confirmation_gain >= minimum_improvement_percent
             ):
                 confirmed.append(
-                    (screening_gain, confirmation_gain, target, model_name)
+                    (
+                        screening_gain,
+                        confirmation_gain,
+                        target,
+                        model_name,
+                        model_inputs,
+                    )
                 )
 
         if len(confirmed) < minimum_confirmed_targets:
@@ -438,17 +553,17 @@ def find_predictive_random_group(
         # The group qualified without looking at final-test answers.
         final_training_rows = df.iloc[development_indices]
         experiments: list[PredictionExperiment] = []
-        for screening_gain, _, target, model_name in confirmed:
+        for screening_gain, _, target, model_name, model_inputs in confirmed:
             model_mae, baseline_mae, final_gain = _mae_comparison(
                 make_model_by_name(model_name, random_state),
                 final_training_rows,
                 final_test_rows,
-                inputs,
+                model_inputs,
                 target,
             )
             experiments.append(PredictionExperiment(
                 target=target,
-                input_questions=inputs,
+                input_questions=model_inputs,
                 validation_improvement_percent=screening_gain,
                 test_model_mae=model_mae,
                 test_baseline_mae=baseline_mae,
@@ -540,10 +655,7 @@ def evaluate_numeric_targets(
     """
 
     inputs = _validate_inputs(df, input_columns)
-    numeric_targets = [
-        column for column in df.select_dtypes(include="number").columns
-        if column not in inputs
-    ]
+    numeric_targets = _prediction_targets(df, inputs)
     train_indices, test_indices = train_test_split(
         np.arange(len(df)), test_size=test_size, random_state=random_state
     )
@@ -606,7 +718,11 @@ def predict_targets(
     predictions: dict[str, float] = {}
 
     for target in targets:
-        if target in inputs or target not in df.columns:
+        if (
+            target in inputs
+            or target not in df.columns
+            or target in EXCLUDED_PREDICTION_TARGETS
+        ):
             raise ValueError(f"Invalid prediction target: {target}")
         if not pd.api.types.is_numeric_dtype(df[target]):
             raise ValueError(f"Target is not numeric: {target}")
@@ -627,10 +743,15 @@ def predict_experiments(
 ) -> dict[str, float]:
     """Predict with the same algorithm that won each target's tournament."""
 
-    inputs = _validate_inputs(df, list(user_answers))
-    user_row = pd.DataFrame([[user_answers[c] for c in inputs]], columns=inputs)
+    _validate_inputs(df, list(user_answers))
     predictions: dict[str, float] = {}
     for experiment in experiments:
+        if experiment.target in EXCLUDED_PREDICTION_TARGETS:
+            raise ValueError(f"Excluded prediction target: {experiment.target}")
+        inputs = list(experiment.input_questions)
+        user_row = pd.DataFrame(
+            [[user_answers[column] for column in inputs]], columns=inputs
+        )
         training_rows = df[df[experiment.target].notna()]
         model = make_model_by_name(experiment.model_name, random_state)
         model.fit(training_rows[inputs], training_rows[experiment.target])
