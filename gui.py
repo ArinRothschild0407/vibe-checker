@@ -62,6 +62,60 @@ def question_scale(question: str, survey_columns: list[str]) -> str:
     return "1 = strongly disagree    •    5 = strongly agree"
 
 
+def prediction_label(question: str, score: float, survey_columns: list[str]) -> str:
+    """Translate a regression score into the nearest original response category."""
+
+    rating = max(1, min(5, int(score + 0.5)))
+    position = survey_columns.index(question)
+    positions = {name: index for index, name in enumerate(survey_columns)}
+
+    music_genre = positions["Dance, Disco, Funk"] <= position <= positions["Opera"]
+    movie_genre = positions["Horror movies"] <= position <= positions["Action movies"]
+    if music_genre or movie_genre:
+        return {
+            1: "Would probably hate it",
+            2: "Would probably dislike it",
+            3: "Feels pretty neutral",
+            4: "Would probably like it",
+            5: "Would probably love it",
+        }[rating]
+
+    if positions["History"] <= position <= positions["Pets"]:
+        return {
+            1: "Not interested at all",
+            2: "Probably not very interested",
+            3: "Somewhere in the middle",
+            4: "Probably interested",
+            5: "Very interested",
+        }[rating]
+
+    if positions["Flying"] <= position <= positions["Public speaking"]:
+        return {
+            1: "Probably not afraid at all",
+            2: "Only a little uneasy",
+            3: "Somewhat uneasy",
+            4: "Probably afraid",
+            5: "Probably very afraid",
+        }[rating]
+
+    if question == "I prefer.":
+        return {
+            1: "Strongly prefers slow music",
+            2: "Leans toward slow music",
+            3: "Likes both about equally",
+            4: "Leans toward fast music",
+            5: "Strongly prefers fast music",
+        }[rating]
+
+    return {
+        1: "Would strongly disagree",
+        2: "Would probably disagree",
+        3: "Feels somewhere in the middle",
+        4: "Would probably agree",
+        5: "Would strongly agree",
+    }[rating]
+
+
 class SurveyApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -614,22 +668,31 @@ class SurveyApp:
 
             target_values = self.survey[experiment.target].dropna()
             if target_values.between(1, 5).all():
-                value_text = f"{predictions[experiment.target]:.2f} / 5"
+                value_text = prediction_label(
+                    experiment.target,
+                    predictions[experiment.target],
+                    self.survey_columns,
+                )
+                score_detail = f"raw model score {predictions[experiment.target]:.2f} / 5"
             elif experiment.target == "Age":
                 value_text = f"{predictions[experiment.target]:.1f} years"
+                score_detail = "numeric estimate"
             else:
                 value_text = f"{predictions[experiment.target]:.2f}"
+                score_detail = "numeric estimate"
             tk.Label(
                 card,
                 text=value_text,
                 bg=result_bg,
                 fg=category_color,
-                font=("Phosphate", 31),
+                font=("Phosphate", 24),
+                wraplength=360,
+                justify="left",
             ).pack(anchor="w", pady=(3, 10))
             tk.Label(
                 card,
                 text=(
-                    f"BEHIND THE CURTAIN  ·  {experiment.model_name}  ·  "
+                    f"BEHIND THE CURTAIN  ·  {score_detail}  ·  {experiment.model_name}  ·  "
                     f"average miss {experiment.test_model_mae:.2f}  ·  "
                     f"{experiment.test_improvement_percent:.1f}% better than a basic guess"
                 ),
