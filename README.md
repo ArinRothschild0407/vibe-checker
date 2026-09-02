@@ -1,9 +1,8 @@
 # Vibe Check: Survey Response Predictor
 
 This project investigates whether a small group of answers from the Kaggle
-**Young People Survey** can predict other unanswered survey responses. It is an
-ML experiment presented as a colorful interactive game—not a claim that a
-person's personality can be read with certainty.
+**Young People Survey** (https://www.kaggle.com/datasets/miroslavsabo/young-people-survey) can predict other unanswered survey responses. It is an
+ML experiment which I have chosen to make interactive through a colorful game and not claim that tries to tell the user something about their personality.
 
 The program searches for a useful group of survey questions, asks the user to
 answer them, and only displays targets that performed better than a constant
@@ -69,13 +68,13 @@ The initial search may take several seconds while models are trained and
 evaluated. The GUI asks 20 survey questions and then shows up to five supported
 predictions.
 
-There is also a terminal version that asks 10 questions:
+There is also a terminal version that asks 10 questions whihc I used for testing:
 
 ```bash
 python game.py
 ```
 
-To print basic information about the dataset, column types, ranges, and missing
+There is alsoa file I used for set up which can be used to print basic information about the dataset, column types, ranges, and missing
 values:
 
 ```bash
@@ -141,4 +140,3 @@ Model train/test splits use fixed random states, while question-group selection
 intentionally includes randomness so different runs can investigate different
 sets of questions. Therefore, the questions and resulting predictions may vary
 between runs.
-

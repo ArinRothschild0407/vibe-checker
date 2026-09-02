@@ -1,7 +1,9 @@
 """Reusable ML experiments for the Young People Survey.
 
-An experiment only uses ``input_columns``. If the game asks five questions,
-evaluation uses those same five answers, never the rest of a survey row.
+I keep the ML work here so the terminal game and GUI only handle interaction.
+Most importantly, an experiment uses only the questions the player will really
+answer. It never secretly uses the rest of a survey row just because those
+columns are available in the CSV.
 """
 
 from dataclasses import dataclass
@@ -37,7 +39,7 @@ class TargetResult:
 
 @dataclass(frozen=True)
 class PredictionExperiment:
-    """A five-question/target relationship tested on untouched participants."""
+    """One input-group/target relationship tested on untouched participants."""
 
     target: str
     input_questions: tuple[str, ...]
@@ -51,7 +53,7 @@ class PredictionExperiment:
 
 @dataclass(frozen=True)
 class QuestionGroupSearch:
-    """A random question group that passed pre-game confirmation."""
+    """A varied, data-guided question group that passed confirmation."""
 
     input_questions: tuple[str, ...]
     experiments: tuple[PredictionExperiment, ...]
@@ -83,6 +85,9 @@ def load_survey(path: str = "data/responses.csv") -> pd.DataFrame:
     response_path = Path(path)
     survey = pd.read_csv(response_path)
     column_guide = pd.read_csv(response_path.with_name("columns.csv"))
+    # responses.csv uses shortened labels. The second file contains the actual
+    # wording shown to survey participants, so I rename everything in one place
+    # instead of maintaining a separate list of display names in each program.
     short_to_original = dict(zip(column_guide["short"], column_guide["original"]))
 
     missing_metadata = set(survey.columns) - set(short_to_original)
@@ -174,6 +179,10 @@ def make_candidate_models(
 ) -> dict[str, Pipeline]:
     """Build leakage-safe candidate models for the model tournament."""
 
+    # These algorithms learn patterns differently. Trees can find interactions,
+    # Ridge is a simpler linear comparison, and KNN asks whether similar people
+    # answered similarly. Held-out MAE chooses the winner instead of me assuming
+    # one model is always best. Screening uses fewer trees because it runs often.
     tree_count = 50 if fast_screening else 150
     return {
         "Random Forest": make_regression_pipeline(
@@ -237,6 +246,8 @@ def _mae_comparison(
     model_mae = mean_absolute_error(
         evaluation_rows[target], model.predict(evaluation_rows[list(inputs)])
     )
+    # The median is the fair constant baseline for MAE. It comes only from the
+    # training rows; using evaluation answers here would be data leakage.
     baseline_value = train_rows[target].median()
     baseline_mae = mean_absolute_error(
         evaluation_rows[target], np.full(len(evaluation_rows), baseline_value)
@@ -254,7 +265,7 @@ def discover_best_prediction_experiment(
     question_count: int = 5,
     random_state: int = 42,
 ) -> PredictionExperiment:
-    """Discover which five questions best predict an unanswered response.
+    """Discover which input questions best predict an unanswered response.
 
     Training selects target-specific inputs, validation ranks all targets, and
     the single best discovery is then confirmed on untouched test participants.
@@ -377,6 +388,9 @@ def choose_guided_questions(
         strongest = correlations.loc[question, cross_category].abs().nlargest(5)
         scores[question] = float(strongest.mean())
 
+    # This is random without being completely arbitrary. A question must first
+    # reach the informative pool, but I sample within that pool so the game does
+    # not ask the exact same highest-scoring questions every run.
     pool = sorted(candidates, key=scores.get, reverse=True)[:pool_size]
     rng = SystemRandom()
     selected: list[str] = []
@@ -492,6 +506,12 @@ def find_predictive_random_group(
     screening_rows = df.iloc[screening_indices]
     confirmation_rows = df.iloc[confirmation_indices]
     final_test_rows = df.iloc[final_test_indices]
+
+    # Each group has one job. Training fits models and finds relationships;
+    # screening cheaply narrows down the targets; confirmation checks finalists
+    # and chooses their model type; final test measures the finished experiment.
+    # Using the same people for all four jobs would make results look stronger
+    # than they really are on somebody the program has never seen.
 
     for attempt in range(1, max_attempts + 1):
         inputs = tuple(choose_guided_questions(
@@ -774,6 +794,9 @@ def predict_experiments(
         user_row = pd.DataFrame(
             [[user_answers[column] for column in inputs]], columns=inputs
         )
+        # The model choice has already passed held-out evaluation. Only now do I
+        # refit it using everyone who answered this target, giving the real user
+        # prediction as much training information as possible.
         training_rows = df[df[experiment.target].notna()]
         model = make_model_by_name(experiment.model_name, random_state)
         model.fit(training_rows[inputs], training_rows[experiment.target])

@@ -1,4 +1,8 @@
-"""Interactive game: random questions followed by evidence-based predictions."""
+"""Terminal version of the survey prediction experiment.
+
+This file handles questions and printed results. The reusable data splitting,
+model testing, and prediction logic stays in model.py.
+"""
 
 from model import (
     find_predictive_random_group,
@@ -14,6 +18,11 @@ QUESTION_COUNT = 10
 TARGET_COUNT = 5
 MIN_CONFIRMED_TARGETS = 3
 MAX_GROUP_ATTEMPTS = 10
+
+# These cutoffs keep the program from presenting every model output as a real
+# discovery. A group must find at least three targets with a 10% gain during
+# selection. A target is finally shown only if it still beats the baseline by 5%
+# on the final test participants. Finding nothing is a valid result.
 
 
 def question_scale(question: str, survey_columns: list[str]) -> str:
@@ -56,6 +65,9 @@ def main() -> None:
     survey = load_survey()
     survey_columns = list(survey.columns)
     print("\nSearching for a useful data-guided 10-question group...")
+    # "Random" does not mean all questions have an equal chance. The ML code
+    # first makes a pool with useful cross-category relationships, then samples
+    # a varied group and tests it before asking the player anything.
     search = find_predictive_random_group(
         survey,
         question_count=QUESTION_COUNT,
@@ -100,7 +112,10 @@ def main() -> None:
     ]
 
     if not confirmed:
-        print("\nThese five answers did not reliably predict another response.")
+        print(
+            f"\nThese {QUESTION_COUNT} answers did not reliably predict "
+            "another response."
+        )
         print("That negative result is part of the experiment; no guess will be made.")
         return
 
@@ -122,6 +137,9 @@ def main() -> None:
             f"baseline {experiment.test_baseline_mae:.3f} "
             f"({experiment.test_improvement_percent:.1f}% better)"
         )
+        # These correlations explain which answers were most associated with the
+        # target. They are clues, not proof of causation and not a replacement
+        # for the held-out MAE comparison above.
         correlations = survey[list(experiment.input_questions)].corrwith(
             survey[experiment.target], method="spearman"
         ).dropna()

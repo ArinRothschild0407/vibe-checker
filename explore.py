@@ -1,5 +1,7 @@
 from model import load_survey
 
+# I keep exploration separate from the game. This lets me check what pandas actually 
+# loaded before assuming which columns are numeric or complete.
 df = load_survey()
 
 print("Dataset shape:", df.shape)
@@ -27,6 +29,9 @@ for column in numeric_columns:
         "max =", df[column].max()
     )
 
+# A participant may skip one answer but complete most of the survey. model.py
+# handles missing targets per experiment instead of deleting that person from
+# every possible experiment.
 missing = df.isnull().sum()
 
 print("\nMissing data:")

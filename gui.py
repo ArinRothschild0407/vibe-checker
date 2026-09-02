@@ -1,4 +1,8 @@
-"""Native desktop interface for the survey prediction experiment."""
+"""Native desktop interface for the survey prediction experiment.
+
+The GUI does not contain the model-selection logic. It collects answers, calls
+the reusable functions in model.py, and explains results in playful language.
+"""
 
 from threading import Thread
 import sys
@@ -19,11 +23,17 @@ MIN_CONFIRMED_TARGETS = 3
 QUALIFYING_IMPROVEMENT_PERCENT = 10.0
 FINAL_IMPROVEMENT_PERCENT = 5.0
 MAX_GROUP_ATTEMPTS = 10
+
+# I started with five and then ten questions. Twenty is the current compromise:
+# more answers give the models more information, but also make the game longer
+# and still do not guarantee that every target can be predicted.
+
 # Regression estimates tend to cluster near 3 because they average many possible
 # responses.  The game can make a bolder call by stretching that estimate away
 # from the neutral midpoint.  We still display the untouched ML estimate so this
 # presentation choice is not confused with extra model accuracy.
 GUESS_BOLDNESS = 1.8
+
 # Preserve macOS trackpad momentum while making each gesture feel responsive.
 TRACKPAD_SCROLL_SPEED = 3
 
@@ -371,6 +381,9 @@ class SurveyApp:
         )
         self.status_label.pack(pady=16)
 
+        # This search trains many small models and can take a few seconds. A
+        # worker thread keeps the window and progress animation responsive;
+        # root.after() sends the finished result back to Tkinter's main thread.
         Thread(target=self._search_worker, daemon=True).start()
 
     def _search_worker(self) -> None:
@@ -615,6 +628,8 @@ class SurveyApp:
 
     def _prediction_worker(self, answers: dict[str, int]) -> None:
         try:
+            # Passing the earlier screening is not enough. The final untouched
+            # participants get the last word about which guesses may be shown.
             confirmed = [
                 experiment for experiment in self.search.experiments
                 if experiment.validation_improvement_percent > 0
@@ -705,6 +720,9 @@ class SurveyApp:
                     bold_score,
                     self.survey_columns,
                 )
+                # The headline gets the more decisive game score, but both
+                # values stay visible so presentation is not confused with an
+                # improvement in the actual ML model.
                 score_detail = (
                     f"bold game guess {bold_score:.2f} / 5  ·  "
                     f"raw model score {raw_score:.2f} / 5"
@@ -738,6 +756,8 @@ class SurveyApp:
                 justify="left",
             ).pack(anchor="w")
 
+            # Correlation makes the result easier to interpret. The held-out MAE
+            # above—not correlation—is what decided this target was predictable.
             correlations = self.survey[list(experiment.input_questions)].corrwith(
                 self.survey[experiment.target], method="spearman"
             ).dropna()
