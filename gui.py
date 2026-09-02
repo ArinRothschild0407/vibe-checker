@@ -206,7 +206,7 @@ class SurveyApp:
         badge_row.pack(fill="x")
         tk.Label(
             badge_row,
-            text="  VIBE CHECK '75  ",
+            text="  VIBE CHECK ",
             bg=MUSTARD,
             fg=BROWN,
             font=("Phosphate", 14),
