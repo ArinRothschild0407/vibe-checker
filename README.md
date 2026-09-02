@@ -26,7 +26,7 @@ Clone the repository and enter its directory:
 
 ```bash
 git clone <repository-url>
-cd presonality-predictor
+cd vibe-checker
 ```
 
 Create and activate a virtual environment:
