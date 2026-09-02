@@ -1,3 +1,7 @@
+#Note, CodeX was used to help implement and make a GUI
+# I had not made one before and was just trying to play around with it and the format and layout
+
+
 """Native desktop interface for the survey prediction experiment.
 
 The GUI does not contain the model-selection logic. It collects answers, calls

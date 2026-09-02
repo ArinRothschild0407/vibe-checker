@@ -1,3 +1,7 @@
+#Note, codex was used to reformat and debug and chat was used
+# to help prtotype an develope model after my initial testing and simple layout with one regression model
+
+
 """Reusable ML experiments for the Young People Survey.
 
 I keep the ML work here so the terminal game and GUI only handle interaction.

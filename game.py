@@ -1,3 +1,7 @@
+#Note, codex was used to reformat and debug and chat was used
+# to help prtotype an develope model after my initial testing and simple layout with one regression model
+#and less predictave test with elss questions 
+
 """Terminal version of the survey prediction experiment.
 
 This file handles questions and printed results. The reusable data splitting,
