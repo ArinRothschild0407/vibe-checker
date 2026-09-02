@@ -1,5 +1,8 @@
 # Vibe Check: Survey Response Predictor
 
+Note: ChatGPT and CodeX were used for protions of the prject, more specific notes in seperate files
+
+
 This project investigates whether a small group of answers from the Kaggle
 **Young People Survey** (https://www.kaggle.com/datasets/miroslavsabo/young-people-survey) can predict other unanswered survey responses. It is an
 ML experiment which I have chosen to make interactive through a colorful game and not claim that tries to tell the user something about their personality.
