@@ -1,6 +1,7 @@
 """Native desktop interface for the survey prediction experiment."""
 
 from threading import Thread
+import sys
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -18,6 +19,13 @@ MIN_CONFIRMED_TARGETS = 3
 QUALIFYING_IMPROVEMENT_PERCENT = 10.0
 FINAL_IMPROVEMENT_PERCENT = 5.0
 MAX_GROUP_ATTEMPTS = 10
+# Regression estimates tend to cluster near 3 because they average many possible
+# responses.  The game can make a bolder call by stretching that estimate away
+# from the neutral midpoint.  We still display the untouched ML estimate so this
+# presentation choice is not confused with extra model accuracy.
+GUESS_BOLDNESS = 1.8
+# Preserve macOS trackpad momentum while making each gesture feel responsive.
+TRACKPAD_SCROLL_SPEED = 3
 
 BACKGROUND = "#f7e5bd"
 CARD = "#fff8e7"
@@ -114,6 +122,13 @@ def prediction_label(question: str, score: float, survey_columns: list[str]) -> 
         4: "Would probably agree",
         5: "Would strongly agree",
     }[rating]
+
+
+def make_bolder_guess(score: float, midpoint: float = 3.0) -> float:
+    """Stretch a 1–5 estimate away from neutral, without leaving the scale."""
+
+    bold_score = midpoint + GUESS_BOLDNESS * (score - midpoint)
+    return max(1.0, min(5.0, bold_score))
 
 
 class SurveyApp:
@@ -305,8 +320,16 @@ class SurveyApp:
 
     def _scroll_wheel(self, event) -> str | None:
         if self.active_canvas is not None and event.delta:
-            direction = -1 if event.delta > 0 else 1
-            self.active_canvas.yview_scroll(direction * 3, "units")
+            if sys.platform == "darwin":
+                # macOS trackpads already send small, momentum-aware deltas.
+                # Keeping their magnitude makes scrolling follow the gesture
+                # instead of converting every event into the same large jump.
+                amount = -event.delta * TRACKPAD_SCROLL_SPEED
+            else:
+                # A traditional Windows mouse wheel normally reports 120 per
+                # notch, so normalize it to a comfortable pixel movement.
+                amount = round(-event.delta / 120 * 36)
+            self.active_canvas.yview_scroll(amount, "units")
             return "break"
         return None
 
@@ -400,7 +423,14 @@ class SurveyApp:
         self._show_questions()
 
     def _scrolling_page(self) -> tuple[tk.Canvas, tk.Frame]:
-        canvas = tk.Canvas(self.content, bg=BACKGROUND, highlightthickness=0)
+        canvas = tk.Canvas(
+            self.content,
+            bg=BACKGROUND,
+            highlightthickness=0,
+            # One scroll unit equals one pixel, allowing trackpad deltas to be
+            # applied gradually rather than jumping by widget-sized units.
+            yscrollincrement=1,
+        )
         scrollbar = ttk.Scrollbar(self.content, orient="vertical", command=canvas.yview)
         body = tk.Frame(canvas, bg=BACKGROUND)
         window = canvas.create_window((0, 0), window=body, anchor="nw")
@@ -668,12 +698,17 @@ class SurveyApp:
 
             target_values = self.survey[experiment.target].dropna()
             if target_values.between(1, 5).all():
+                raw_score = predictions[experiment.target]
+                bold_score = make_bolder_guess(raw_score)
                 value_text = prediction_label(
                     experiment.target,
-                    predictions[experiment.target],
+                    bold_score,
                     self.survey_columns,
                 )
-                score_detail = f"raw model score {predictions[experiment.target]:.2f} / 5"
+                score_detail = (
+                    f"bold game guess {bold_score:.2f} / 5  ·  "
+                    f"raw model score {raw_score:.2f} / 5"
+                )
             elif experiment.target == "Age":
                 value_text = f"{predictions[experiment.target]:.1f} years"
                 score_detail = "numeric estimate"
