@@ -1,11 +1,13 @@
 # Vibe Check: Survey Response Predictor
 
-Note: ChatGPT and CodeX were used for protions of the prject, more specific notes in seperate files
+Note: ChatGPT and Codex were used for portions of the project. More specific
+notes are available in separate files.
 
 
 This project investigates whether a small group of answers from the Kaggle
 **Young People Survey** (https://www.kaggle.com/datasets/miroslavsabo/young-people-survey) can predict other unanswered survey responses. It is an
-ML experiment which I have chosen to make interactive through a colorful game and not claim that tries to tell the user something about their personality.
+ML experiment that I have chosen to make interactive through a colorful game.
+It does not claim to tell the user something definitive about their personality.
 
 The program searches for a useful group of survey questions, asks the user to
 answer them, and only displays targets that performed better than a constant
@@ -15,8 +17,8 @@ baseline on held-out survey participants.
 
 - Python 3.10 or newer
 - `pip`
-- Tkinter for the desktop GUI (included with standard Python installations on
-  macOS and Windows)
+- Tkinter for the desktop GUI (included with Python from python.org on macOS
+  and Windows; see troubleshooting below for Homebrew and Linux)
 
 The required dataset files are already included:
 
@@ -28,7 +30,7 @@ The required dataset files are already included:
 Clone the repository and enter its directory:
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/ArinRothschild0407/vibe-checker.git
 cd vibe-checker
 ```
 
@@ -43,6 +45,14 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
+Each time you open a new terminal to work on the project, return to the cloned
+directory and reactivate the environment:
+
+```bash
+cd vibe-checker
+source .venv/bin/activate
+```
+
 ### Windows PowerShell
 
 ```powershell
@@ -52,12 +62,74 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-On some Linux systems, Tkinter must be installed separately before launching
-the GUI. For Ubuntu/Debian:
+For later PowerShell sessions, reactivate the environment after entering the
+project directory:
+
+```powershell
+cd vibe-checker
+.venv\Scripts\Activate.ps1
+```
+
+## Tkinter troubleshooting
+
+Test the Python interpreter from the activated virtual environment:
 
 ```bash
+python -m tkinter
+```
+
+A small Tk window should open. If Python reports `No module named '_tkinter'`
+or `No module named 'tkinter'`, install Tkinter for the same Python version used
+to create the virtual environment.
+
+### macOS with Homebrew
+
+Homebrew installs Tkinter separately from Python. For the current Homebrew
+Python 3.14 packages:
+
+```bash
+brew install python@3.14 python-tk@3.14
+```
+
+If you use another Homebrew Python version, install the matching formula (for
+example, `python-tk@3.13` for `python@3.13`). Then recreate and reactivate the
+virtual environment so it uses that interpreter:
+
+```bash
+deactivate 2>/dev/null || true
+rm -rf .venv
+python3.14 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m tkinter
+```
+
+### Linux
+
+Install the operating-system package before creating the virtual environment.
+For Ubuntu or Debian:
+
+```bash
+sudo apt update
 sudo apt install python3-tk
 ```
+
+For Fedora:
+
+```bash
+sudo dnf install python3-tkinter
+```
+
+For Arch Linux:
+
+```bash
+sudo pacman -S tk
+```
+
+If the environment was created before Tkinter was installed, recreate it using
+the macOS/Linux installation commands above. Tkinter is part of the Python
+installation and intentionally is not listed in `requirements.txt`.
 
 ## Running the project
 
@@ -71,14 +143,15 @@ The initial search may take several seconds while models are trained and
 evaluated. The GUI asks 20 survey questions and then shows up to five supported
 predictions.
 
-There is also a terminal version that asks 10 questions whihc I used for testing:
+There is also a terminal version that asks 10 questions, which I used for
+testing:
 
 ```bash
 python game.py
 ```
 
-There is alsoa file I used for set up which can be used to print basic information about the dataset, column types, ranges, and missing
-values:
+There is also a file I used during setup. It prints basic information about the
+dataset, column types, ranges, and missing values:
 
 ```bash
 python explore.py
