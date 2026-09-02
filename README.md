@@ -1,4 +1,4 @@
-# Vibe Check '75: Survey Response Predictor
+# Vibe Check: Survey Response Predictor
 
 This project investigates whether a small group of answers from the Kaggle
 **Young People Survey** can predict other unanswered survey responses. It is an

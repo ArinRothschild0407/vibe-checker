@@ -134,7 +134,7 @@ def make_bolder_guess(score: float, midpoint: float = 3.0) -> float:
 class SurveyApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("Vibe Check '75")
+        self.root.title("Vibe Check")
         self.root.geometry("980x780")
         self.root.minsize(760, 620)
         self.root.configure(bg=BACKGROUND)
